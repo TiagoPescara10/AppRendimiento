@@ -32,6 +32,10 @@ writeFileSync(
       target: 'ES2022',
       module: 'commonjs',
       moduleResolution: 'node',
+      // TS 6 (SDK 56) convirtio en error el deprecado de node10. Mantener la
+      // resolucion tal cual es deliberado: estas pruebas existen para cargar
+      // el grafo de imports real. Migrar a node16/bundler antes de TS 7.
+      ignoreDeprecations: '6.0',
       esModuleInterop: true,
       skipLibCheck: true,
       strict: false,
