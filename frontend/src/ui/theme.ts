@@ -92,6 +92,16 @@ export const colors = {
   warning: palette.amber600,
   danger: palette.red600,
 
+  // fases del temporizador de intervalos.
+  // Son fondos de pantalla completa: el color es lo que te deja saber en que
+  // fase estas de reojo, sin leer, asi que aca pesa mas el contraste entre
+  // los tres que la coherencia con el violeta de la marca. Los tres llevan
+  // textOnFase encima y ninguno baja de 4.5:1 contra blanco.
+  faseTrabajo: palette.violet700,
+  faseDescanso: palette.green700,
+  faseDescansoBloque: palette.stone700,
+  textOnFase: palette.white,
+
   // overlay
   overlay: 'rgba(28, 25, 23, 0.5)',
 } as const;
@@ -152,6 +162,7 @@ export const fontSize = {
   subtitle: 18,
   title: 22,
   display: 32,   // numeros grandes del dashboard (kcal restantes)
+  timer: 96,     // la cuenta del temporizador, que se lee a un metro
 } as const;
 
 export const lineHeight = {
@@ -161,6 +172,7 @@ export const lineHeight = {
   subtitle: 26,
   title: 28,
   display: 38,
+  timer: 104,
 } as const;
 
 export const fontWeight = {

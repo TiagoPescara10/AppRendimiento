@@ -8,11 +8,18 @@ type Props = {
   children: ReactNode;
   scroll?: boolean;
   style?: StyleProp<ViewStyle>;
+  /**
+   * Fondo distinto al de la app. Existe para el temporizador, que pinta la
+   * pantalla entera segun la fase; el color tiene que llegar hasta el borde
+   * de arriba, o sea al SafeAreaView, y no solo al contenido.
+   * Siempre un token de colors, nunca un hex suelto.
+   */
+  fondo?: string;
 };
 
-export function Pantalla({ children, scroll = true, style }: Props) {
+export function Pantalla({ children, scroll = true, style, fondo }: Props) {
   return (
-    <SafeAreaView style={estilos.safe} edges={['top']}>
+    <SafeAreaView style={[estilos.safe, !!fondo && { backgroundColor: fondo }]} edges={['top']}>
       <KeyboardAvoidingView
         style={estilos.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
