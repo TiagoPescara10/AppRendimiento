@@ -16,37 +16,17 @@ import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
 import { listarEventosPorRango } from '@/db/queries/eventos';
 import { materializarRutinas } from '@/features/agenda/materializar';
 import { ETIQUETA_TIPO, horaDe } from '@/features/agenda/formato';
+import { aFechaLocal, aISOLocal } from '@/lib/fechas';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import type { EventoRow, TipoEvento } from '@/db/schema';
 
 // ---------------------------------------------------------------------------
-// Helpers de fecha
+// La grilla
 //
-// Todo se calcula en hora local. `fecha_hora_inicio` se guarda con offset
-// local y la columna generada `fecha` sale de sus primeros 10 caracteres, asi
-// que las claves de este archivo son "YYYY-MM-DD" locales y comparan directo.
+// Las claves de este archivo son "YYYY-MM-DD" locales, que es lo que devuelve
+// aFechaLocal() y lo que trae la columna generada `fecha`: comparan directo,
+// sin convertir nada. El por que del formato esta en lib/fechas.ts.
 // ---------------------------------------------------------------------------
-
-const p = (n: number) => String(n).padStart(2, '0');
-
-/** "YYYY-MM-DD" en hora local. NO usar toISOString(), que convierte a UTC. */
-function claveFecha(d: Date): string {
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
-/** ISO 8601 con offset local, para los limites del rango que se consulta. */
-function aISOLocal(d: Date): string {
-  const offsetMin = -d.getTimezoneOffset();
-  const signo = offsetMin >= 0 ? '+' : '-';
-  const offH = p(Math.floor(Math.abs(offsetMin) / 60));
-  const offM = p(Math.abs(offsetMin) % 60);
-
-  return (
-    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
-    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` +
-    `${signo}${offH}:${offM}`
-  );
-}
 
 const DIAS_CABECERA = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
 
@@ -73,7 +53,7 @@ function armarGrilla(ancla: Date): Celda[] {
     const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i);
     celdas.push({
       fecha: d,
-      clave: claveFecha(d),
+      clave: aFechaLocal(d),
       delMes: d.getMonth() === ancla.getMonth(),
     });
   }
@@ -109,7 +89,7 @@ export default function Agenda() {
   const [semana, setSemana] = useState<EventoRow[]>([]);
   const [cargando, setCargando] = useState(true);
 
-  const hoy = claveFecha(new Date());
+  const hoy = aFechaLocal(new Date());
 
   // useMemo y no una llamada suelta: la grilla es dependencia del efecto de
   // abajo, y sin memoizar cambia de identidad en cada render y lo dispara.

@@ -19,6 +19,7 @@ import { crearComida, agregarItem } from '@/db/queries/comidas';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import type { TipoComida } from '@/db/schema';
 import { randomUUID } from '@/db/sync/uuid';
+import { aISOLocal } from '@/lib/fechas';
 
 /**
  * Un alimento agregado a la comida que todavia no se guardo. Se convierte en
@@ -49,26 +50,6 @@ function kcalDe(alimento: Alimento, gramos: number): number {
 
 function capitalizar(texto: string): string {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
-}
-
-/**
- * ISO 8601 CON offset local. La columna generada `fecha` de la tabla comida
- * sale de los primeros 10 caracteres de este string, asi que mandar UTC haria
- * que las cenas caigan en el dia siguiente.
- */
-function ahoraLocalISO(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  const offsetMin = -d.getTimezoneOffset();
-  const signo = offsetMin >= 0 ? '+' : '-';
-  const offH = p(Math.floor(Math.abs(offsetMin) / 60));
-  const offM = p(Math.abs(offsetMin) % 60);
-
-  return (
-    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
-    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` +
-    `${signo}${offH}:${offM}`
-  );
 }
 
 export default function NuevaComida() {
@@ -150,7 +131,7 @@ export default function NuevaComida() {
         id: comidaId,
         usuario_id: perfil.id,
         tipo,
-        fecha_hora: ahoraLocalISO(),
+        fecha_hora: aISOLocal(new Date()),
       });
 
       // TODO: esto deberia ir en una transaccion. Si falla un item a la mitad,

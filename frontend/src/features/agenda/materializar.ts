@@ -7,12 +7,10 @@
 // `completado` y el temporizador operan sobre una ocurrencia concreta, y no
 // hay donde escribir eso si el evento del martes no existe como fila.
 //
-// La hora local es el punto delicado de todo el archivo. `evento.fecha` es una
-// columna generada con substr(fecha_hora_inicio, 1, 10), asi que la fecha del
-// evento son literalmente los primeros 10 caracteres del string que guardamos.
-// Guardar UTC manda un entrenamiento de las 22:00 en Buenos Aires al dia
-// siguiente. Todo lo de abajo construye el ISO con offset local, igual que
-// ahoraLocalISO() en app/comida/nueva.tsx, y nunca pasa por toISOString().
+// La hora local es el punto delicado de todo el archivo: `evento.fecha` es una
+// columna generada con substr(fecha_hora_inicio, 1, 10). Por eso las fechas
+// salen de aFechaLocal() y aISOLocal(), de lib/fechas.ts, donde esta explicado
+// por que no se pasa por toISOString().
 
 import {
   eliminarEventosFuturosDeRutina,
@@ -22,31 +20,20 @@ import {
 import { actualizarRutina, listarRutinas } from '../../db/queries/rutinas';
 import { getDb } from '../../db/schema';
 import { randomUUID } from '../../db/sync/uuid';
-
-const pad = (n: number): string => String(n).padStart(2, '0');
-
-/** YYYY-MM-DD del dia LOCAL. Nunca toISOString(), que convierte a UTC. */
-function fechaLocal(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-/** El sufijo de offset local, "-03:00". Lo que separa el dia correcto del anterior. */
-function offsetLocal(d: Date): string {
-  const min = -d.getTimezoneOffset();
-  const signo = min >= 0 ? '+' : '-';
-  return `${signo}${pad(Math.floor(Math.abs(min) / 60))}:${pad(Math.abs(min) % 60)}`;
-}
+import { aFechaLocal, aISOLocal } from '../../lib/fechas';
 
 /**
  * ISO 8601 con offset local a partir de un dia y un "HH:MM".
  * El Date se construye con el constructor local, no con Date.UTC: el offset
- * que se estampa al final tiene que ser el del instante, y en una zona con
+ * que estampa aISOLocal tiene que ser el del instante, y en una zona con
  * horario de verano no es el mismo todo el ano.
+ *
+ * Los segundos van en cero por construccion, asi que aISOLocal escribe ":00"
+ * igual que la version que vivia aca.
  */
 function inicioLocalISO(dia: Date, hora: string): string {
   const [hh, mm] = hora.split(':').map(Number);
-  const d = new Date(dia.getFullYear(), dia.getMonth(), dia.getDate(), hh, mm, 0, 0);
-  return `${fechaLocal(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}:00${offsetLocal(d)}`;
+  return aISOLocal(new Date(dia.getFullYear(), dia.getMonth(), dia.getDate(), hh, mm, 0, 0));
 }
 
 /** Medianoche local del dia de `d`. El ancla de la ventana. */
@@ -92,8 +79,8 @@ export async function materializarRutinas(
   await getDb().withTransactionAsync(async () => {
     const yaHay = await fechasMaterializadas(
       rutinas.map((r) => r.id),
-      fechaLocal(inicio),
-      fechaLocal(ultimo),
+      aFechaLocal(inicio),
+      aFechaLocal(ultimo),
     );
 
     // Una sola lectura para todas las ocurrencias candidatas, en vez de un
@@ -103,7 +90,7 @@ export async function materializarRutinas(
 
     for (let i = 0; i < dias; i++) {
       const dia = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i);
-      const fecha = fechaLocal(dia);
+      const fecha = aFechaLocal(dia);
 
       for (const rutina of rutinas) {
         if (rutina.dia_semana !== dia.getDay()) continue;
@@ -148,7 +135,13 @@ export async function desactivarRutina(
   rutinaId: string,
   hoy: Date = new Date(),
 ): Promise<number> {
-  const corte = `${fechaLocal(hoy)}T${pad(hoy.getHours())}:${pad(hoy.getMinutes())}:00${offsetLocal(hoy)}`;
+  // Los segundos van en cero, igual que antes: `hoy` es new Date() y trae los
+  // del momento. El corte se compara como texto contra fecha_hora_inicio, asi
+  // que redondear hacia abajo es lo conservador — a lo sumo alcanza a una
+  // ocurrencia que arranca dentro de este mismo minuto.
+  const alMinuto = new Date(hoy);
+  alMinuto.setSeconds(0, 0);
+  const corte = aISOLocal(alMinuto);
 
   let borrados = 0;
   await getDb().withTransactionAsync(async () => {

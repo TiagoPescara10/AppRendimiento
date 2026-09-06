@@ -17,6 +17,7 @@ import { materializarRutinas } from '@/features/agenda/materializar';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import type { TipoEvento, Intensidad } from '@/db/schema';
 import { randomUUID } from '@/db/sync/uuid';
+import { aISOLocal } from '@/lib/fechas';
 
 // ---------------------------------------------------------------------------
 // Constantes y helpers
@@ -43,29 +44,25 @@ const p = (n: number) => String(n).padStart(2, '0');
 
 /**
  * "08:30" en hora LOCAL. El CHECK del DDL rechaza "8:30", de ahi el padding.
- * No pasar por toISOString(): eso convierte a UTC y en Argentina te corre
- * la hora tres lugares.
+ * Sobre por que se lee del Date local y no de toISOString(), ver lib/fechas.ts.
  */
 function horaLocal(d: Date): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 /**
- * ISO 8601 CON offset local. La columna generada `fecha` de evento sale de
- * los primeros 10 caracteres, asi que guardar UTC manda los entrenamientos
- * de la noche al dia siguiente.
+ * Copia de `d` con los segundos en cero.
+ *
+ * `cuando` arranca en new Date(), o sea con los segundos del instante en que
+ * se abrio la pantalla, y el picker de fecha no los toca. Sin esto, un partido
+ * puesto a las 14:23 se guardaria como 14:23:47: no rompe nada, pero es ruido
+ * que el usuario no eligio. La version de aISOLocal que vivia en este archivo
+ * fijaba los segundos en "00" por esto mismo.
  */
-function aISOLocal(d: Date): string {
-  const offsetMin = -d.getTimezoneOffset();
-  const signo = offsetMin >= 0 ? '+' : '-';
-  const offH = p(Math.floor(Math.abs(offsetMin) / 60));
-  const offM = p(Math.abs(offsetMin) % 60);
-
-  return (
-    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
-    `T${p(d.getHours())}:${p(d.getMinutes())}:00` +
-    `${signo}${offH}:${offM}`
-  );
+function sinSegundos(d: Date): Date {
+  const copia = new Date(d);
+  copia.setSeconds(0, 0);
+  return copia;
 }
 
 function fechaLegible(d: Date): string {
@@ -146,7 +143,7 @@ export default function NuevoEvento() {
           id: randomUUID(),
           usuario_id: perfil.id,
           tipo,
-          fecha_hora_inicio: aISOLocal(cuando),
+          fecha_hora_inicio: aISOLocal(sinSegundos(cuando)),
           duracion_estimada_min: duracion,
           intensidad,
         });
