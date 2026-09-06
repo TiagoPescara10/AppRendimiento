@@ -1,0 +1,6 @@
+# Worktrees que crea Claude Code. Es infraestructura de la herramienta, no del
+# proyecto: adentro hay un checkout completo con su node_modules y un .git
+# anidado. Se ignora solo esta subcarpeta y no .claude/ entero, para que mas
+# adelante se pueda versionar config del proyecto (settings, skills) si hace
+# falta.
+.claude/worktrees/
