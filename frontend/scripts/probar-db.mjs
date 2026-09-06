@@ -9,6 +9,12 @@
 // archivo, y por eso no vio un ciclo de imports que dejaba el DDL en undefined
 // y hacia fallar initDb() en el dispositivo.
 
+// Zona horaria fija, antes de cualquier Date. Sin esto, las pruebas que
+// verifican que la fecha sale del dia LOCAL y no de UTC pasan por casualidad
+// en una maquina en UTC: es justo el bug que buscan. La zona es la del
+// proyecto, y es la que aparece en los fixtures (-03:00).
+process.env.TZ = 'America/Argentina/Buenos_Aires';
+
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,10 +46,13 @@ writeFileSync(
       skipLibCheck: true,
       strict: false,
       outDir: build,
-      rootDir: join(RAIZ, 'src/db'),
+      // rootDir es src/ y no src/db/ porque features/agenda/ tambien entra:
+      // materializar.ts es codigo que se prueba, no una pantalla. La salida
+      // queda en build/db/ y build/features/, de ahi los require de abajo.
+      rootDir: join(RAIZ, 'src'),
       types: [],
     },
-    include: [join(RAIZ, 'src/db/**/*.ts')],
+    include: [join(RAIZ, 'src/db/**/*.ts'), join(RAIZ, 'src/features/agenda/**/*.ts')],
   }),
 );
 
@@ -108,17 +117,19 @@ async function lanza(fn, patron, que) {
 
 console.log('capa de datos (modulos reales):');
 
-const schema = req('./schema.js');
-const migrations = req('./migrations/index.js');
-const meta = req('./meta.js');
-const qPerfil = req('./queries/perfil.js');
-const qPeso = req('./queries/peso.js');
-const qComidas = req('./queries/comidas.js');
-const qAlimentos = req('./queries/alimentos.js');
-const qEventos = req('./queries/eventos.js');
-const qSueno = req('./queries/sueno.js');
-const qEnergia = req('./queries/energia.js');
-const semillas = req('./seeds/alimentos.js');
+const schema = req('./db/schema.js');
+const migrations = req('./db/migrations/index.js');
+const meta = req('./db/meta.js');
+const qPerfil = req('./db/queries/perfil.js');
+const qPeso = req('./db/queries/peso.js');
+const qComidas = req('./db/queries/comidas.js');
+const qAlimentos = req('./db/queries/alimentos.js');
+const qEventos = req('./db/queries/eventos.js');
+const qRutinas = req('./db/queries/rutinas.js');
+const qSueno = req('./db/queries/sueno.js');
+const qEnergia = req('./db/queries/energia.js');
+const semillas = req('./db/seeds/alimentos.js');
+const agenda = req('./features/agenda/materializar.js');
 
 // El ciclo de imports se manifiesta aca: si schema -> migrations -> 00N -> schema,
 // el literal queda congelado en undefined al construirse el objeto.
@@ -141,14 +152,14 @@ await prueba('initDb() abre y migra una base en memoria', async () => {
   igual(v.user_version, migrations.VERSION_ESQUEMA, 'user_version');
 });
 
-await prueba('las 9 tablas existen', async () => {
+await prueba('las 10 tablas existen', async () => {
   const filas = await schema
     .getDb()
     .getAllAsync("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
   const nombres = filas.map((f) => f.name);
   const esperadas = [
     'alimento', 'comida', 'evento', 'item_comida', 'meta',
-    'perfil', 'registro_energia', 'registro_peso', 'registro_sueno',
+    'perfil', 'registro_energia', 'registro_peso', 'registro_sueno', 'rutina',
   ];
   igual(nombres.join(','), esperadas.join(','), 'tablas');
 });
@@ -365,9 +376,317 @@ await prueba('el CHECK rechaza un nivel de energia fuera de 1-5', () =>
   ),
 );
 
+// --- rutinas semanales y materializacion ------------------------------------
+//
+// El instante es fijo y la zona tambien (TZ arriba del archivo): sin las dos
+// cosas, "no toca eventos pasados" depende de cuando corre la prueba y "la
+// fecha sale del dia local" pasa por casualidad en una maquina en UTC.
+//
+// Los dias de la semana se derivan de HOY en vez de escribirse a mano, asi la
+// prueba no depende de que dia cayo la fecha elegida.
+
+const HOY = new Date(2026, 8, 4, 14, 0, 0); // viernes 4/9/2026, 14:00 local
+const MANANA = (HOY.getDay() + 1) % 7;
+
+const contarEventos = async (usuarioId) =>
+  (await schema.getDb().getFirstAsync('SELECT count(*) AS n FROM evento WHERE usuario_id = ?', [
+    usuarioId,
+  ])).n;
+
+await prueba('el CHECK rechaza una hora sin padding', () =>
+  lanza(
+    () =>
+      qRutinas.crearRutina({
+        id: 'rX', usuario_id: 'u1', dia_semana: 1, hora: '8:30',
+        tipo: 'entrenamiento', intensidad: 'media',
+      }),
+    /CHECK/i,
+    'hora 8:30',
+  ),
+);
+
+await prueba('el CHECK rechaza un dia_semana fuera de 0-6', () =>
+  lanza(
+    () =>
+      qRutinas.crearRutina({
+        id: 'rX', usuario_id: 'u1', dia_semana: 7, hora: '08:30',
+        tipo: 'entrenamiento', intensidad: 'media',
+      }),
+    /CHECK/i,
+    'dia_semana 7',
+  ),
+);
+
+await prueba('materializarRutinas() genera una ocurrencia por semana', async () => {
+  await qRutinas.crearRutina({
+    id: 'ru1', usuario_id: 'u1', dia_semana: MANANA, hora: '08:30',
+    tipo: 'entrenamiento', duracion_estimada_min: 90, intensidad: 'alta',
+  });
+  const n = await agenda.materializarRutinas('u1', 2, HOY);
+  igual(n, 2, 'eventos generados en 2 semanas');
+
+  const generados = await schema.getDb().getAllAsync(
+    'SELECT * FROM evento WHERE rutina_id = ? ORDER BY fecha_hora_inicio', ['ru1']);
+  igual(generados.length, 2, 'filas con ese rutina_id');
+  igual(generados[0].tipo, 'entrenamiento', 'tipo copiado de la rutina');
+  igual(generados[0].duracion_estimada_min, 90, 'duracion copiada');
+  igual(generados[0].intensidad, 'alta', 'intensidad copiada');
+  igual(generados[0].completado, 0, 'nace sin completar');
+});
+
+// La razon de ser del anti-duplicado: esto corre en cada arranque de la app.
+await prueba('correrla dos veces no duplica', async () => {
+  const antes = await contarEventos('u1');
+  const n = await agenda.materializarRutinas('u1', 2, HOY);
+  igual(n, 0, 'eventos generados en la segunda corrida');
+  igual(await contarEventos('u1'), antes, 'total de eventos');
+});
+
+// Mover el horario no da dos eventos el mismo dia: la clave del anti-duplicado
+// es (rutina_id, fecha), no fecha_hora_inicio.
+await prueba('cambiarle la hora a la rutina no agrega un segundo evento ese dia', async () => {
+  await qRutinas.actualizarRutina('ru1', { hora: '19:00' });
+  const n = await agenda.materializarRutinas('u1', 2, HOY);
+  igual(n, 0, 'eventos generados tras mover la hora');
+  const r = await schema.getDb().getAllAsync(
+    'SELECT fecha FROM evento WHERE rutina_id = ? GROUP BY fecha HAVING count(*) > 1', ['ru1']);
+  igual(r.length, 0, 'dias con dos eventos');
+  await qRutinas.actualizarRutina('ru1', { hora: '08:30' });
+});
+
+// El bug que motivo todo esto: con toISOString() el entrenamiento de las 22:00
+// en Buenos Aires (-03:00) es la 01:00 UTC del dia siguiente, y `fecha` sale de
+// los primeros 10 caracteres del string. La ultima aseveracion es la que
+// importa: confirma que UTC habria dado OTRO dia, o sea que la prueba muerde.
+await prueba('la fecha generada sale del dia LOCAL, no de UTC', async () => {
+  await qRutinas.crearRutina({
+    id: 'ru2', usuario_id: 'u1', dia_semana: MANANA, hora: '22:00',
+    tipo: 'gimnasio', intensidad: 'media',
+  });
+  await agenda.materializarRutinas('u1', 1, HOY);
+
+  const nocturnos = await schema.getDb().getAllAsync(
+    'SELECT * FROM evento WHERE rutina_id = ?', ['ru2']);
+  igual(nocturnos.length, 1, 'ocurrencias en 1 semana');
+
+  const e = nocturnos[0];
+  igual(e.fecha_hora_inicio.slice(11, 16), '22:00', 'hora local guardada');
+  igual(e.fecha_hora_inicio.slice(19), '-03:00', 'offset local en el ISO');
+  igual(e.fecha, e.fecha_hora_inicio.slice(0, 10), 'fecha = primeros 10 del ISO');
+  igual(
+    new Date(e.fecha_hora_inicio).toISOString().slice(0, 10) === e.fecha,
+    false,
+    'en UTC caeria otro dia (si esto es true, la prueba no prueba nada)',
+  );
+});
+
+// Crear a las 14:00 el entrenamiento de las 08:30 de esta manana solo deja una
+// fila que nadie va a marcar.
+await prueba('no genera la ocurrencia de hoy que ya paso', async () => {
+  await qRutinas.crearRutina({
+    id: 'ru3', usuario_id: 'u1', dia_semana: HOY.getDay(), hora: '08:00',
+    tipo: 'gimnasio', intensidad: 'baja',
+  });
+  const n = await agenda.materializarRutinas('u1', 1, HOY);
+  igual(n, 0, 'ocurrencias generadas para una hora que ya paso');
+});
+
+await prueba('desactivar una rutina no borra los eventos pasados', async () => {
+  // Una ocurrencia de la semana pasada, como la habria dejado una corrida
+  // anterior, y otra suelta que la rutina no debe tocar nunca.
+  await qEventos.crearEvento({
+    id: 'ev-pasado', usuario_id: 'u1', tipo: 'entrenamiento',
+    fecha_hora_inicio: '2026-08-28T08:30:00-03:00', intensidad: 'alta',
+    completado: true, rutina_id: 'ru1',
+  });
+  await qEventos.crearEvento({
+    id: 'ev-suelto', usuario_id: 'u1', tipo: 'partido',
+    fecha_hora_inicio: '2026-09-20T16:00:00-03:00', intensidad: 'alta',
+  });
+
+  const futurosAntes = await schema.getDb().getFirstAsync(
+    'SELECT count(*) AS n FROM evento WHERE rutina_id = ? AND fecha_hora_inicio >= ?',
+    ['ru1', '2026-09-04T14:00:00-03:00'],
+  );
+  igual(futurosAntes.n, 2, 'futuros de la rutina antes de desactivar');
+
+  const borrados = await agenda.desactivarRutina('ru1', HOY);
+  igual(borrados, 2, 'eventos futuros borrados');
+
+  const pasado = await qEventos.obtenerEvento('ev-pasado');
+  igual(pasado === null, false, 'el evento pasado sigue existiendo');
+  igual(pasado.completado, 1, 'y conserva su completado');
+
+  const suelto = await qEventos.obtenerEvento('ev-suelto');
+  igual(suelto === null, false, 'el evento sin rutina_id sigue existiendo');
+
+  const quedan = await schema.getDb().getAllAsync(
+    'SELECT id FROM evento WHERE rutina_id = ?', ['ru1']);
+  igual(quedan.length, 1, 'ocurrencias de la rutina que quedan');
+
+  const r = await qRutinas.obtenerRutina('ru1');
+  igual(r.activa, 0, 'la rutina quedo inactiva');
+});
+
+await prueba('una rutina inactiva no vuelve a generar', async () => {
+  await agenda.materializarRutinas('u1', 2, HOY);
+  const generados = await schema.getDb().getAllAsync(
+    'SELECT id FROM evento WHERE rutina_id = ?', ['ru1']);
+  // Solo queda el pasado. Contar el total de u1 aca no serviria: ru2 y ru3
+  // siguen activas y esta corrida amplia su ventana de 1 semana a 2.
+  igual(generados.length, 1, 'ocurrencias de la rutina desactivada');
+  igual(generados[0].id, 'ev-pasado', 'la unica que queda es la pasada');
+});
+
+// El historial no depende de que la regla siga existiendo: ON DELETE SET NULL.
+await prueba('borrar la rutina deja sus eventos huerfanos, no los borra', async () => {
+  await qRutinas.eliminarRutina('ru1');
+  const e = await qEventos.obtenerEvento('ev-pasado');
+  igual(e === null, false, 'el evento sobrevivio a la rutina');
+  igual(e.rutina_id, null, 'quedo suelto (SET NULL)');
+});
+
+await prueba('marcarCompletado() da vuelta el flag', async () => {
+  await qEventos.marcarCompletado('ev-suelto', true);
+  igual((await qEventos.obtenerEvento('ev-suelto')).completado, 1, 'completado');
+  await qEventos.marcarCompletado('ev-suelto', false);
+  igual((await qEventos.obtenerEvento('ev-suelto')).completado, 0, 'sin completar');
+});
+
+await prueba('listarRutinas() filtra por activas', async () => {
+  const todas = await qRutinas.listarRutinas('u1');
+  const activas = await qRutinas.listarRutinas('u1', true);
+  igual(todas.length, 2, 'rutinas totales (ru2 y ru3)');
+  igual(activas.length, 2, 'rutinas activas');
+  await qRutinas.actualizarRutina('ru3', { activa: false });
+  igual((await qRutinas.listarRutinas('u1', true)).length, 1, 'activas tras desactivar ru3');
+});
+
+// --- eventos sin responder --------------------------------------------------
+//
+// `completado = 0` solia querer decir dos cosas: "no lo hice" y "todavia no
+// conteste". Estas pruebas son sobre la segunda.
+//
+// Mismo HOY que la seccion de rutinas: viernes 4/9/2026 14:00 local (-03:00).
+// Con horas = 2 el corte cae a las 12:00 local, o sea 15:00 UTC. Cada fixture
+// de abajo elige su inicio y su duracion para caer de un lado o del otro.
+
+// Las secciones anteriores dejaron eventos de u1 sin responder (e1, ev-pasado
+// y las ocurrencias materializadas). Se responden todos de una para que lo que
+// devuelva la consulta sea solo lo que crea esta seccion.
+await schema.getDb().runAsync("UPDATE evento SET respondido = 1 WHERE usuario_id = 'u1'");
+
+const sinResponder = async (horas, ahora = HOY) =>
+  (await qEventos.listarEventosSinResponder('u1', horas, ahora)).map((e) => e.id);
+
+const crearPendiente = (id, inicio, duracion) =>
+  qEventos.crearEvento({
+    id, usuario_id: 'u1', tipo: 'entrenamiento',
+    fecha_hora_inicio: inicio, duracion_estimada_min: duracion, intensidad: 'media',
+  });
+
+await prueba('un evento nace sin responder', async () => {
+  const e = await crearPendiente('sr-viejo', '2026-09-04T10:00:00-03:00', 60);
+  igual(e.respondido, 0, 'respondido al crearse');
+  igual(e.completado, 0, 'completado al crearse');
+});
+
+await prueba('uno que termino hace 3 horas y sigue mudo aparece', async () => {
+  igual((await sinResponder(2)).includes('sr-viejo'), true, 'sr-viejo en la lista');
+});
+
+// Este es tambien el caso que caza una confusion UTC/local: el fin son las
+// 13:00 locales y el corte las 15:00 UTC. Comparar sin normalizar el offset lo
+// mueve tres horas y lo manda del otro lado.
+await prueba('uno que termino hace 1 hora no aparece', async () => {
+  await crearPendiente('sr-reciente', '2026-09-04T12:00:00-03:00', 60);
+  igual((await sinResponder(2)).includes('sr-reciente'), false, 'sr-reciente fuera');
+});
+
+await prueba('uno ya respondido no aparece, diga que si o que no', async () => {
+  await crearPendiente('sr-dijo-si', '2026-09-04T10:00:00-03:00', 60);
+  await crearPendiente('sr-dijo-no', '2026-09-04T10:00:00-03:00', 60);
+  await qEventos.responderEvento('sr-dijo-si', true);
+  await qEventos.responderEvento('sr-dijo-no', false);
+
+  const ids = await sinResponder(2);
+  igual(ids.includes('sr-dijo-si'), false, 'el que dijo que si');
+  igual(ids.includes('sr-dijo-no'), false, 'el que dijo que no');
+
+  // Y la distincion que motivo la columna: "no lo hice" no es "no conteste".
+  const no = await qEventos.obtenerEvento('sr-dijo-no');
+  igual(no.completado, 0, 'completado');
+  igual(no.respondido, 1, 'respondido');
+});
+
+await prueba('uno futuro no aparece', async () => {
+  await crearPendiente('sr-futuro', '2026-09-04T18:00:00-03:00', 60);
+  igual((await sinResponder(2)).includes('sr-futuro'), false, 'sr-futuro fuera');
+});
+
+// El fixture del borde es el que prueba que el default se aplica: con 60 el fin
+// son las 12:30 y queda afuera; si la duracion se tomara como 0 el fin serian
+// las 11:30 y entraria. Que este AFUERA es la afirmacion.
+await prueba('duracion_estimada_min NULL usa el default de 60', async () => {
+  await crearPendiente('sr-null-entra', '2026-09-04T10:15:00-03:00', null);
+  await crearPendiente('sr-null-borde', '2026-09-04T11:30:00-03:00', null);
+
+  const ids = await sinResponder(2);
+  igual(ids.includes('sr-null-entra'), true, 'fin 11:15, adentro');
+  igual(ids.includes('sr-null-borde'), false, 'fin 12:30, afuera (con 0 entraria)');
+});
+
+// Un error de offset son tres horas: mueve los dos fixtures al mismo lado del
+// corte y esta prueba lo delata.
+await prueba('el corte cae exactamente a las `horas` del fin previsto', async () => {
+  await crearPendiente('sr-borde-adentro', '2026-09-04T10:59:00-03:00', 60);
+  await crearPendiente('sr-borde-afuera', '2026-09-04T11:01:00-03:00', 60);
+
+  const ids = await sinResponder(2);
+  igual(ids.includes('sr-borde-adentro'), true, 'fin 11:59, un minuto adentro');
+  igual(ids.includes('sr-borde-afuera'), false, 'fin 12:01, un minuto afuera');
+});
+
+// El evento que termina despues de medianoche UTC pero antes de medianoche
+// local: su dia local y su dia UTC son distintos, y aun asi cae donde debe.
+await prueba('el offset se respeta cruzando la medianoche UTC', async () => {
+  const e = await crearPendiente('sr-nocturno', '2026-09-03T23:30:00-03:00', 60);
+  igual(e.fecha, '2026-09-03', 'dia local del evento');
+  igual(
+    new Date(e.fecha_hora_inicio).toISOString().slice(0, 10),
+    '2026-09-04',
+    'su dia UTC es otro (si no, la prueba no muerde)',
+  );
+  igual((await sinResponder(2)).includes('sr-nocturno'), true, 'igual aparece');
+});
+
+await prueba('vienen del mas viejo al mas nuevo', async () => {
+  const ids = await sinResponder(2);
+  const esperado = ['sr-nocturno', 'sr-viejo', 'sr-null-entra', 'sr-borde-adentro'];
+  igual(ids.join(','), esperado.join(','), 'orden y contenido de la lista');
+});
+
+await prueba('el parametro horas corre la ventana', async () => {
+  // Con 6 horas de margen solo sobrevive el de anoche.
+  igual((await sinResponder(6)).join(','), 'sr-nocturno', 'ventana de 6 horas');
+  // Con 0, todo lo que ya termino cuenta, incluido el de hace una hora.
+  igual((await sinResponder(0)).includes('sr-reciente'), true, 'ventana de 0 horas');
+  igual((await sinResponder(0)).includes('sr-futuro'), false, 'el futuro nunca entra');
+});
+
+// El check a mano es una respuesta. Si esto escribiera solo `completado`, el
+// evento volveria a aparecer en el cartel despues de que el usuario contesto.
+await prueba('marcarCompletado() tambien deja el evento respondido', async () => {
+  await qEventos.marcarCompletado('sr-viejo', true);
+  const e = await qEventos.obtenerEvento('sr-viejo');
+  igual(e.completado, 1, 'completado');
+  igual(e.respondido, 1, 'respondido');
+  igual((await sinResponder(2)).includes('sr-viejo'), false, 'ya no aparece');
+});
+
 await prueba('borrar el perfil arrastra todo lo suyo (CASCADE)', async () => {
   await qPerfil.eliminarPerfil('u1');
-  for (const t of ['comida', 'registro_sueno', 'registro_energia', 'registro_peso', 'evento']) {
+  for (const t of ['comida', 'registro_sueno', 'registro_energia', 'registro_peso', 'evento', 'rutina']) {
     const r = await schema.getDb().getFirstAsync(`SELECT count(*) AS n FROM ${t}`);
     igual(r.n, 0, `${t} tras borrar el perfil`);
   }
@@ -401,6 +720,63 @@ await prueba('segundo arranque: sale por el marcador, sin tocar el catalogo', as
   const v = await schema.getDb().getFirstAsync('PRAGMA user_version');
   igual(v.user_version, migrations.VERSION_ESQUEMA, 'user_version');
   await schema.cerrarDb();
+});
+
+// --- actualizar una base que ya tenia eventos -------------------------------
+//
+// Todo lo de arriba corre sobre bases nuevas, donde la 004 crea sus cosas y el
+// backfill de `respondido` no encuentra una sola fila. Pero en el telefono de
+// alguien que ya viene usando la app la 004 llega a una tabla `evento` con
+// historial, y ahi el backfill es lo unico que evita que la primera apertura
+// despues de actualizar sea un cartel por cada entrenamiento que registro.
+//
+// Se arma una base a mano en la version 3 (las migraciones publicadas antes de
+// esta tanda), se le meten eventos, y recien ahi se migra.
+
+const sqlite = req('expo-sqlite');
+const viejaDb = join(tmp, 'v3-con-datos.db');
+
+await prueba('la 004 sobre una base v3 con eventos: la migra sin perder nada', async () => {
+  const db = await sqlite.openDatabaseAsync(viejaDb);
+  for (const m of migrations.migraciones.filter((x) => x.version <= 3)) {
+    await db.execAsync(m.sql);
+  }
+  await db.execAsync('PRAGMA user_version = 3');
+
+  const t = '2020-01-01T00:00:00-03:00';
+  await db.runAsync(
+    'INSERT INTO perfil (id, fecha_alta, created_at, updated_at) VALUES (?, ?, ?, ?)',
+    ['viejo', t, t, t],
+  );
+  const evento = (id, inicio, completado) =>
+    db.runAsync(
+      `INSERT INTO evento (id, usuario_id, tipo, fecha_hora_inicio, intensidad, completado, created_at, updated_at)
+       VALUES (?, ?, 'entrenamiento', ?, 'media', ?, ?, ?)`,
+      [id, 'viejo', inicio, completado, t, t],
+    );
+  await evento('hecho-hace-anos', '2020-01-15T20:00:00-03:00', 1);
+  await evento('nunca-marcado', '2020-02-03T20:00:00-03:00', 0);
+  await evento('agendado-a-futuro', '2099-06-01T09:00:00-03:00', 0);
+
+  igual(await migrations.migrar(db), migrations.VERSION_ESQUEMA, 'version tras migrar');
+
+  const filas = await db.getAllAsync('SELECT id, completado, respondido FROM evento ORDER BY id');
+  igual(filas.length, 3, 'los eventos siguen ahi');
+
+  const por = Object.fromEntries(filas.map((f) => [f.id, f]));
+  // Lo que ya paso se da por contestado: nunca se le pregunto y preguntarle
+  // ahora por un entrenamiento de hace anos no significa nada.
+  igual(por['hecho-hace-anos'].respondido, 1, 'el viejo completado');
+  igual(por['nunca-marcado'].respondido, 1, 'el viejo sin completar');
+  igual(por['nunca-marcado'].completado, 0, 'y conserva su completado');
+  // El futuro queda mudo a proposito: ese si hay que preguntarlo cuando pase.
+  igual(por['agendado-a-futuro'].respondido, 0, 'el futuro sigue sin responder');
+
+  // La tabla nueva llego por el camino de ALTER/CREATE, no por un CREATE limpio.
+  const r = await db.getFirstAsync("SELECT count(*) AS n FROM sqlite_master WHERE name = 'rutina'");
+  igual(r.n, 1, 'la tabla rutina existe tras actualizar');
+
+  await db.closeAsync();
 });
 
 // --- salida ----------------------------------------------------------------

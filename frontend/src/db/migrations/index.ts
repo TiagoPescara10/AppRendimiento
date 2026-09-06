@@ -13,6 +13,7 @@ import type * as SQLite from 'expo-sqlite';
 import { migracion001 } from './001_inicial';
 import { migracion002 } from './002_alimento_porciones';
 import { migracion003 } from './003_meta';
+import { migracion004 } from './004_rutinas';
 
 export interface Migracion {
   /** Entero creciente, sin huecos. Termina en PRAGMA user_version. */
@@ -22,7 +23,12 @@ export interface Migracion {
   sql: string;
 }
 
-export const migraciones: Migracion[] = [migracion001, migracion002, migracion003];
+export const migraciones: Migracion[] = [
+  migracion001,
+  migracion002,
+  migracion003,
+  migracion004,
+];
 
 /** Version del esquema que espera este build. */
 export const VERSION_ESQUEMA: number = migraciones.reduce(

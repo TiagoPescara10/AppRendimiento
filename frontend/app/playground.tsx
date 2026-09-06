@@ -17,21 +17,32 @@ import { router } from 'expo-router';
 import * as SQLite from 'expo-sqlite';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { cerrarDb, NOMBRE_DB } from '@/db/schema';
+import { reloadAppAsync } from 'expo';
+import NuevoEvento from './evento/nuevo';
+
 
 export default function Prueba() {
   const dirigir = () => {
     router.push('/registro');
   }
+
+  const nuevaComida = () => {
+    router.push('/comida/nueva');
+  }
+
+  const NuevoEvento = () => {
+    router.push("./evento/nuevo")
+  }
+
   const resetear = async () => {
     try {
       await cerrarDb();
       await SQLite.deleteDatabaseAsync(NOMBRE_DB);
     } catch (e) {
-      // Si no existe, ya esta borrada. No es un error real.
       console.log('Base ya borrada o inexistente');
     }
     await AsyncStorage.clear();
-    Alert.alert('Listo', 'Recargá la app (sacudí el teléfono → Reload).');
+    await reloadAppAsync();
   };
   const [nivel, setNivel] = useState<'sedentario' | 'ligero' | 'moderado' | null>(null);
   return (
@@ -93,13 +104,14 @@ export default function Prueba() {
         </Card>
 
         {/* Los tres botones juntos, para comparar */}
-        <Boton titulo="Registrar comida" onPress={() => {}} ancho />
+        <Boton titulo="Registrar comida" onPress={nuevaComida} ancho />
         <View style={{ height: spacing.sm }} />
         <Boton titulo="Secundario" variante="secundario" onPress={() => {}} ancho />
         <View style={{ height: spacing.sm }} />
         <Boton titulo="Cargando" cargando onPress={() => {}} ancho />
 
         <Boton titulo="Resetear todo" onPress={resetear} />
+        <Boton titulo="Nuevo evento" onPress={NuevoEvento} />
         
         
         <Input label="Peso" placeholder="72,5" keyboardType="decimal-pad" style={{ marginBottom: spacing.md }} />

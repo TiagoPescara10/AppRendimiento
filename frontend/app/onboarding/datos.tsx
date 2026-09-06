@@ -107,7 +107,7 @@ export default function Datos() {
             themeVariant="light"
             textColor={colors.textPrimary}
             accentColor={colors.action}
-            onChange={(evento, nueva) => {
+            onValueChange={(evento, nueva) => {
               // Android: el picker es un dialogo modal y onChange dispara una
               // sola vez, al confirmar o cancelar.
               // iOS: es inline y dispara en CADA giro de la rueda, asi que

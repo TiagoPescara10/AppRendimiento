@@ -1,10 +1,16 @@
+// Registro de una comida. El flujo es: elegis el tipo (ya viene sugerido por
+// la hora), buscas alimentos, y por cada uno elegis cuanto comiste. Nada se
+// escribe en la base hasta que tocas "Guardar comida".
+
 import { useState, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert, FlatList, Modal } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Input } from '@/ui/Input';
 import { Boton } from '@/ui/Boton';
+import { SheetPorciones } from '@/features/comidas/components/SheetPorciones';
+import type { DatosSheet } from '@/features/comidas/components/SheetPorciones';
 import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
 
 import { buscarAlimentosPorNombre } from '@/db/queries/alimentos';
@@ -14,6 +20,12 @@ import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import type { TipoComida } from '@/db/schema';
 import { randomUUID } from '@/db/sync/uuid';
 
+/**
+ * Un alimento agregado a la comida que todavia no se guardo. Se convierte en
+ * fila de item_comida recien al tocar Guardar.
+ *
+ * `porcion` es solo para mostrar: lo que se persiste es cantidad_g.
+ */
 type ItemPendiente = {
   alimento: Alimento;
   cantidad_g: number;
@@ -31,15 +43,49 @@ function tipoPorHora(): TipoComida {
   return 'cena';
 }
 
+function kcalDe(alimento: Alimento, gramos: number): number {
+  return Math.round((alimento.kcal_por_100g * gramos) / 100);
+}
+
+function capitalizar(texto: string): string {
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+/**
+ * ISO 8601 CON offset local. La columna generada `fecha` de la tabla comida
+ * sale de los primeros 10 caracteres de este string, asi que mandar UTC haria
+ * que las cenas caigan en el dia siguiente.
+ */
+function ahoraLocalISO(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  const offsetMin = -d.getTimezoneOffset();
+  const signo = offsetMin >= 0 ? '+' : '-';
+  const offH = p(Math.floor(Math.abs(offsetMin) / 60));
+  const offM = p(Math.abs(offsetMin) % 60);
+
+  return (
+    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
+    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` +
+    `${signo}${offH}:${offM}`
+  );
+}
+
 export default function NuevaComida() {
   const router = useRouter();
+
   const [tipo, setTipo] = useState<TipoComida>(tipoPorHora);
+  const [selectorAbierto, setSelectorAbierto] = useState(false);
   const [busqueda, setBusqueda] = useState('');
   const [resultados, setResultados] = useState<Alimento[]>([]);
   const [items, setItems] = useState<ItemPendiente[]>([]);
-  const [elegido, setElegido] = useState<Alimento | null>(null);
   const [guardando, setGuardando] = useState(false);
 
+  // El sheet sirve para agregar (indice null) o editar (indice = posicion).
+  const [sheet, setSheet] = useState<{ alimento: Alimento; indice: number | null } | null>(null);
+
+  // Busqueda. Contra 318 filas locales es instantanea, asi que no hace falta
+  // debounce. El flag `vivo` evita que una respuesta vieja pise a una nueva.
   useEffect(() => {
     if (!busqueda.trim()) {
       setResultados([]);
@@ -48,22 +94,44 @@ export default function NuevaComida() {
     let vivo = true;
     buscarAlimentosPorNombre(busqueda)
       .then((r) => { if (vivo) setResultados(r); })
-      .catch(console.error);
+      .catch((e) => console.error('Error al buscar alimentos:', e));
     return () => { vivo = false; };
   }, [busqueda]);
 
-  const agregar = (alimento: Alimento, cantidad_g: number, porcion: string) => {
-    setItems((prev) => [...prev, { alimento, cantidad_g, porcion }]);
-    setElegido(null);
-    setBusqueda('');
+  const confirmarPorcion = (cantidad_g: number, porcion: string) => {
+    if (!sheet) return;
+    const nuevo: ItemPendiente = { alimento: sheet.alimento, cantidad_g, porcion };
+
+    setItems((prev) =>
+      sheet.indice === null
+        ? [...prev, nuevo]
+        : prev.map((it, i) => (i === sheet.indice ? nuevo : it)),
+    );
+
+    setSheet(null);
+    setBusqueda('');   // limpiar deja la lista de items a la vista otra vez
   };
 
-  const sacar = (indice: number) => {
-    setItems((prev) => prev.filter((_, i) => i !== indice));
+  const quitarItem = () => {
+    if (!sheet || sheet.indice === null) return;
+    const i = sheet.indice;
+    setItems((prev) => prev.filter((_, idx) => idx !== i));
+    setSheet(null);
   };
 
-  const totalKcal = Math.round(
-    items.reduce((s, i) => s + (i.alimento.kcal_por_100g * i.cantidad_g) / 100, 0),
+  // Totales en vivo. Se redondea al final y no por item: redondear cada uno
+  // hace que la suma de las partes no de el total que se muestra.
+  const totales = items.reduce(
+    (acc, it) => {
+      const f = it.cantidad_g / 100;
+      return {
+        kcal: acc.kcal + it.alimento.kcal_por_100g * f,
+        prot: acc.prot + it.alimento.proteina_g * f,
+        carb: acc.carb + it.alimento.carbohidratos_g * f,
+        grasa: acc.grasa + it.alimento.grasa_g * f,
+      };
+    },
+    { kcal: 0, prot: 0, carb: 0, grasa: 0 },
   );
 
   const guardar = async () => {
@@ -82,9 +150,11 @@ export default function NuevaComida() {
         id: comidaId,
         usuario_id: perfil.id,
         tipo,
-        fecha_hora: new Date().toISOString(),
+        fecha_hora: ahoraLocalISO(),
       });
 
+      // TODO: esto deberia ir en una transaccion. Si falla un item a la mitad,
+      // queda una comida incompleta guardada.
       for (const item of items) {
         await agregarItem({
           id: randomUUID(),
@@ -104,170 +174,251 @@ export default function NuevaComida() {
     }
   };
 
+  const buscando = busqueda.trim().length > 0;
+
+  // Traduccion del estado local al contrato del sheet compartido.
+  const datosSheet: DatosSheet | null = sheet && {
+    nombre: sheet.alimento.nombre,
+    kcal_por_100g: sheet.alimento.kcal_por_100g,
+    porciones: sheet.alimento.porciones,
+    cantidadActual: sheet.indice != null ? items[sheet.indice]?.cantidad_g : undefined,
+    onQuitar: sheet.indice != null ? quitarItem : undefined,
+  };
+
   return (
     <Pantalla>
-      <View style={estilos.tipos}>
-        {TIPOS.map((t) => (
-          <Pressable
-            key={t}
-            style={[estilos.chip, tipo === t && estilos.chipActivo]}
-            onPress={() => setTipo(t)}
-          >
-            <Text style={[estilos.chipTexto, tipo === t && estilos.chipTextoActivo]}>
-              {t.charAt(0).toUpperCase() + t.slice(1)}
-            </Text>
-          </Pressable>
-        ))}
+      {/* Encabezado: cerrar + selector de tipo desplegable */}
+      <View style={estilos.header}>
+        <Pressable onPress={() => router.back()} hitSlop={12}>
+          <Text style={estilos.cerrar}>✕</Text>
+        </Pressable>
+        <Pressable style={estilos.selector} onPress={() => setSelectorAbierto(true)}>
+          <Text style={estilos.selectorTexto}>{capitalizar(tipo)}</Text>
+          <Text style={estilos.selectorFlecha}>▾</Text>
+        </Pressable>
       </View>
 
-      <Input
-        value={busqueda}
-        onChangeText={setBusqueda}
-        placeholder="Buscar alimento"
-        autoCorrect={false}
-      />
+      {/* Buscador + los dos accesos alternativos. Todavia no hacen nada. */}
+      <View style={estilos.buscadorFila}>
+        <View style={estilos.flex}>
+          <Input
+            value={busqueda}
+            onChangeText={setBusqueda}
+            placeholder="Buscar alimento"
+            autoCorrect={false}
+          />
+        </View>
+        <Pressable
+          style={estilos.accionChica}
+          onPress={() => Alert.alert('Próximamente', 'Registrar por foto todavía no está listo.')}
+        >
+          <Text style={estilos.accionIcono}>📷</Text>
+        </Pressable>
+        <Pressable
+          style={estilos.accionChica}
+          onPress={() => Alert.alert('Próximamente', 'El escáner todavía no está listo.')}
+        >
+          <Text style={estilos.accionIcono}>▥</Text>
+        </Pressable>
+      </View>
 
-      {busqueda.trim() ? (
-        <FlatList
-          data={resultados}
-          keyExtractor={(a) => a.id}
-          scrollEnabled={false}
-          renderItem={({ item }) => (
-            <Pressable style={estilos.resultado} onPress={() => setElegido(item)}>
-              <Text style={estilos.nombre}>{item.nombre}</Text>
-              <Text style={estilos.detalle}>{item.kcal_por_100g} kcal / 100 g</Text>
-            </Pressable>
-          )}
-          ListEmptyComponent={
-            <Text style={estilos.detalle}>No encontramos nada con ese nombre.</Text>
-          }
-        />
-      ) : items.length === 0 ? (
-        <Text style={estilos.detalle}>Buscá lo que comiste para empezar.</Text>
-      ) : (
+      {/* Tres estados excluyentes: buscando, vacio, o con items cargados. */}
+      {buscando ? (
         <View>
+          {resultados.map((a) => (
+            <Pressable
+              key={a.id}
+              style={estilos.resultado}
+              onPress={() => setSheet({ alimento: a, indice: null })}
+            >
+              <View style={estilos.flex}>
+                <Text style={estilos.nombre}>{a.nombre}</Text>
+                <Text style={estilos.detalle}>{a.kcal_por_100g} kcal / 100 g</Text>
+              </View>
+              <Text style={estilos.mas}>+</Text>
+            </Pressable>
+          ))}
+
+          {resultados.length === 0 && (
+            <View style={estilos.vacio}>
+              <Text style={estilos.detalle}>No encontramos nada con ese nombre.</Text>
+              <Text style={estilos.detalle}>Probá con otro nombre o cargalo a mano.</Text>
+            </View>
+          )}
+        </View>
+      ) : items.length === 0 ? (
+        <View style={estilos.vacio}>
+          <Text style={estilos.detalle}>Buscá lo que comiste para empezar.</Text>
+        </View>
+      ) : (
+        <View style={estilos.lista}>
           {items.map((item, i) => (
-            <Pressable key={i} style={estilos.item} onPress={() => sacar(i)}>
-              <View style={estilos.itemTexto}>
+            <Pressable
+              key={`${item.alimento.id}-${i}`}
+              style={estilos.item}
+              onPress={() => setSheet({ alimento: item.alimento, indice: i })}
+            >
+              <View style={estilos.flex}>
                 <Text style={estilos.nombre}>{item.alimento.nombre}</Text>
                 <Text style={estilos.porcion}>
                   {item.porcion} · {item.cantidad_g} g
                 </Text>
               </View>
-              <Text style={estilos.nombre}>
-                {Math.round((item.alimento.kcal_por_100g * item.cantidad_g) / 100)}
-              </Text>
+              <View style={estilos.derecha}>
+                <Text style={estilos.nombre}>{kcalDe(item.alimento, item.cantidad_g)}</Text>
+                <Text style={estilos.unidad}>kcal</Text>
+              </View>
             </Pressable>
           ))}
         </View>
       )}
 
-      {items.length > 0 && (
+      {/* Pie con totales. Solo cuando hay algo cargado. */}
+      {items.length > 0 && !buscando && (
         <View style={estilos.pie}>
           <View style={estilos.totalFila}>
             <Text style={estilos.nombre}>Total</Text>
-            <Text style={estilos.total}>{totalKcal} kcal</Text>
+            <Text style={estilos.total}>{Math.round(totales.kcal)} kcal</Text>
+          </View>
+          <View style={estilos.macros}>
+            <Text style={estilos.detalle}>P {Math.round(totales.prot)} g</Text>
+            <Text style={estilos.detalle}>C {Math.round(totales.carb)} g</Text>
+            <Text style={estilos.detalle}>G {Math.round(totales.grasa)} g</Text>
           </View>
           <Boton titulo="Guardar comida" onPress={guardar} cargando={guardando} />
         </View>
       )}
 
+      {/* Selector de tipo de comida. */}
+      <Modal
+        visible={selectorAbierto}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectorAbierto(false)}
+      >
+        <View style={estilos.fondo}>
+          <Pressable style={estilos.flex} onPress={() => setSelectorAbierto(false)} />
+          <View style={estilos.sheet}>
+            <View style={estilos.agarre} />
+            <Text style={estilos.sheetTitulo}>¿Qué comida es?</Text>
+
+            {TIPOS.map((t) => (
+              <Pressable
+                key={t}
+                style={[estilos.opcion, tipo === t && estilos.opcionActiva]}
+                onPress={() => {
+                  setTipo(t);
+                  setSelectorAbierto(false);
+                }}
+              >
+                <Text style={estilos.nombre}>{capitalizar(t)}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      </Modal>
+
       <SheetPorciones
-        alimento={elegido}
-        onCerrar={() => setElegido(null)}
-        onElegir={agregar}
+        datos={datosSheet}
+        onCerrar={() => setSheet(null)}
+        onConfirmar={confirmarPorcion}
       />
     </Pantalla>
   );
 }
 
-function SheetPorciones({
-  alimento,
-  onCerrar,
-  onElegir,
-}: {
-  alimento: Alimento | null;
-  onCerrar: () => void;
-  onElegir: (a: Alimento, gramos: number, porcion: string) => void;
-}) {
-  if (!alimento) return null;
-
-  return (
-    <Modal visible transparent animationType="slide" onRequestClose={onCerrar}>
-      <Pressable style={estilos.fondo} onPress={onCerrar}>
-        <Pressable style={estilos.sheet} onPress={(e) => e.stopPropagation()}>
-          <Text style={estilos.nombre}>{alimento.nombre}</Text>
-          <Text style={estilos.detalle}>¿Cuánto comiste?</Text>
-
-          {alimento.porciones.map((p) => (
-            <Pressable
-              key={p.nombre}
-              style={estilos.opcion}
-              onPress={() => onElegir(alimento, p.gramos, p.nombre)}
-            >
-              <Text style={estilos.nombre}>{p.nombre}</Text>
-              <Text style={estilos.detalle}>
-                {p.gramos} g · {Math.round((alimento.kcal_por_100g * p.gramos) / 100)} kcal
-              </Text>
-            </Pressable>
-          ))}
-
-          {alimento.porciones.length === 0 && (
-            <Pressable
-              style={estilos.opcion}
-              onPress={() => onElegir(alimento, 100, '100 g')}
-            >
-              <Text style={estilos.nombre}>100 g</Text>
-            </Pressable>
-          )}
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
 const estilos = StyleSheet.create({
-  tipos: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
-  chip: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-  },
-  chipActivo: { backgroundColor: colors.action },
-  chipTexto: { fontSize: fontSize.small, color: colors.textSecondary },
-  chipTextoActivo: { color: colors.textOnAction },
+  flex: { flex: 1 },
 
-  resultado: { paddingVertical: spacing.sm, borderBottomWidth: 0.5, borderBottomColor: colors.border },
+  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  cerrar: { fontSize: fontSize.body, color: colors.textSecondary },
+  selector: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  selectorTexto: {
+    fontSize: fontSize.body,
+    lineHeight: lineHeight.body,
+    fontWeight: '500',
+    color: colors.textPrimary,
+  },
+  selectorFlecha: { fontSize: fontSize.small, color: colors.textSecondary },
+
+  buscadorFila: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  accionChica: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accionIcono: { fontSize: 20 },
+
+  resultado: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 0.5,
+    borderBottomColor: colors.border,
+  },
+  mas: { fontSize: fontSize.title, color: colors.action, paddingHorizontal: spacing.sm },
+
+  vacio: { paddingVertical: spacing.xl, alignItems: 'center', gap: spacing.xs },
+
+  lista: { gap: spacing.xs },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: spacing.md,
     backgroundColor: colors.surface,
     borderRadius: radius.md,
-    marginBottom: spacing.xs,
   },
-  itemTexto: { flex: 1 },
+  derecha: { alignItems: 'flex-end' },
+  unidad: { fontSize: fontSize.small, color: colors.textSecondary },
 
   nombre: { fontSize: fontSize.body, lineHeight: lineHeight.body, color: colors.textPrimary },
   detalle: { fontSize: fontSize.small, lineHeight: lineHeight.small, color: colors.textSecondary },
   porcion: { fontSize: fontSize.small, color: colors.action, marginTop: 2 },
 
-  pie: { borderTopWidth: 0.5, borderTopColor: colors.border, paddingTop: spacing.md, gap: spacing.sm },
+  pie: {
+    borderTopWidth: 0.5,
+    borderTopColor: colors.border,
+    paddingTop: spacing.md,
+    gap: spacing.sm,
+  },
   totalFila: { flexDirection: 'row', justifyContent: 'space-between' },
   total: { fontSize: fontSize.body, fontWeight: '500', color: colors.textPrimary },
+  macros: { flexDirection: 'row', gap: spacing.md },
 
+  // Estilos del modal del selector de tipo.
   fondo: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
     backgroundColor: colors.bg,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     padding: spacing.lg,
+    paddingBottom: spacing.xxxl,
     gap: spacing.sm,
   },
-  opcion: {
-    paddingVertical: spacing.md,
-    borderBottomWidth: 0.5,
-    borderBottomColor: colors.border,
+  agarre: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: 'center',
+    marginBottom: spacing.sm,
   },
+  sheetTitulo: {
+    fontSize: fontSize.body,
+    lineHeight: lineHeight.body,
+    fontWeight: '500',
+    color: colors.textPrimary,
+  },
+  opcion: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+  },
+  opcionActiva: { borderWidth: 1.5, borderColor: colors.action },
 });

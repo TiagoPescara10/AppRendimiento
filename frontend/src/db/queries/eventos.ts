@@ -18,6 +18,8 @@ export interface NuevoEvento {
   intensidad: Intensidad;
   completado?: boolean;
   notas?: string | null;
+  /** La rutina que lo genero. null o ausente para un evento suelto. */
+  rutina_id?: string | null;
 }
 
 export async function crearEvento(datos: NuevoEvento): Promise<EventoRow> {
@@ -25,8 +27,8 @@ export async function crearEvento(datos: NuevoEvento): Promise<EventoRow> {
   await getDb().runAsync(
     `INSERT INTO evento
        (id, usuario_id, tipo, fecha_hora_inicio, duracion_estimada_min,
-        intensidad, completado, notas, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        intensidad, completado, notas, rutina_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       datos.id,
       datos.usuario_id,
@@ -36,6 +38,7 @@ export async function crearEvento(datos: NuevoEvento): Promise<EventoRow> {
       datos.intensidad,
       datos.completado ? 1 : 0,
       datos.notas ?? null,
+      datos.rutina_id ?? null,
       t,
       t,
     ],
@@ -113,6 +116,7 @@ export async function actualizarEvento(
     intensidad?: Intensidad;
     completado?: boolean;
     notas?: string | null;
+    rutina_id?: string | null;
   },
 ): Promise<void> {
   const campos: string[] = [];
@@ -142,6 +146,10 @@ export async function actualizarEvento(
     campos.push('notas = ?');
     valores.push(cambios.notas);
   }
+  if (cambios.rutina_id !== undefined) {
+    campos.push('rutina_id = ?');
+    valores.push(cambios.rutina_id);
+  }
   if (campos.length === 0) return;
 
   await getDb().runAsync(`UPDATE evento SET ${campos.join(', ')}, updated_at = ? WHERE id = ?`, [
@@ -151,6 +159,127 @@ export async function actualizarEvento(
   ]);
 }
 
+/**
+ * Atajo del check en la lista del dia. Delega en responderEvento() a proposito:
+ * marcar el check A MANO es contestar. Si esto escribiera solo `completado`,
+ * dejaria el evento en respondido = 0 y volveria a aparecer en el cartel de
+ * pendientes despues de que el usuario ya dijo lo suyo.
+ */
+export async function marcarCompletado(id: string, completado: boolean): Promise<void> {
+  await responderEvento(id, completado);
+}
+
 export async function eliminarEvento(id: string): Promise<void> {
   await getDb().runAsync('DELETE FROM evento WHERE id = ?', [id]);
+}
+
+// ---------------------------------------------------------------------------
+// Eventos sin responder
+//
+// `completado = 0` solia significar dos cosas: "no lo hice" y "todavia no
+// conteste". `respondido` las separa, y esto es lo que busca a quien
+// preguntarle: eventos cuyo fin previsto ya paso hace rato y siguen mudos.
+// ---------------------------------------------------------------------------
+
+/** Lo que se asume cuando el evento no tiene duracion cargada. */
+const DURACION_POR_DEFECTO_MIN = 60;
+
+/**
+ * Eventos cuyo fin previsto (inicio + duracion_estimada_min) ya paso hace mas
+ * de `horas` y que siguen sin responder. Del mas viejo al mas nuevo.
+ *
+ * Sobre las fechas, que es lo delicado de esta consulta:
+ * `fecha_hora_inicio` se guarda como ISO 8601 CON offset local, no en UTC.
+ * datetime() de SQLite lee ese offset y normaliza a UTC
+ * ('2026-09-04T22:00:00-03:00' -> '2026-09-05 01:00:00'), asi que sumarle la
+ * duracion ahi adentro da el fin real. El corte se manda ya en UTC: los dos
+ * lados de la comparacion quedan en la misma escala y el offset no se pierde.
+ *
+ * El ORDER BY tambien pasa por datetime() y se despega del resto del archivo,
+ * que ordena por el texto crudo. Ordenar strings a pelo solo funciona si todas
+ * las filas tienen el mismo offset; aca la funcion ya se esta llamando igual.
+ *
+ * El instante se inyecta para las pruebas; se llama `ahoraRef` y no `ahora`
+ * porque `ahora()` ya es el helper de timestamps de este modulo. Las pantallas
+ * la llaman con uno o dos argumentos.
+ */
+export async function listarEventosSinResponder(
+  usuarioId: string,
+  horas: number = 2,
+  ahoraRef: Date = new Date(),
+): Promise<EventoRow[]> {
+  // 'YYYY-MM-DD HH:MM:SS' en UTC, el formato que compara datetime().
+  const corte = new Date(ahoraRef.getTime() - horas * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 19)
+    .replace('T', ' ');
+
+  return getDb().getAllAsync<EventoRow>(
+    `SELECT * FROM evento
+     WHERE usuario_id = ?
+       AND respondido = 0
+       AND datetime(fecha_hora_inicio, '+' || COALESCE(duracion_estimada_min, ?) || ' minutes') < ?
+     ORDER BY datetime(fecha_hora_inicio) ASC`,
+    [usuarioId, DURACION_POR_DEFECTO_MIN, corte],
+  );
+}
+
+/**
+ * Marca la respuesta del usuario. Deja respondido = 1 siempre: haya dicho que
+ * si o que no, ya contesto y no hay que volver a preguntarle.
+ *
+ * Es tambien el camino de "Empezar" y del check a mano, que responden con
+ * completado = true. Esa regla vive aca y no en las pantallas para que una
+ * pantalla nueva no se olvide de escribir `respondido`.
+ */
+export async function responderEvento(id: string, completado: boolean): Promise<void> {
+  await getDb().runAsync(
+    'UPDATE evento SET completado = ?, respondido = 1, updated_at = ? WHERE id = ?',
+    [completado ? 1 : 0, ahora(), id],
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Eventos que vienen de una rutina
+//
+// Las dos consultas que necesita la materializacion. Viven aca y no en
+// features/agenda/ para que todo el SQL contra `evento` quede en un archivo.
+// ---------------------------------------------------------------------------
+
+/**
+ * Los pares (rutina_id, fecha) ya materializados en la ventana. Es la lectura
+ * del anti-duplicado: una consulta en vez de una por ocurrencia candidata.
+ *
+ * La clave es (rutina_id, fecha) y no fecha_hora_inicio: si el usuario mueve
+ * el horario de la rutina, ese dia ya tiene su evento y no corresponde otro.
+ * Pega contra idx_evento_rutina.
+ */
+export async function fechasMaterializadas(
+  rutinaIds: string[],
+  desde: string,
+  hasta: string,
+): Promise<{ rutina_id: string; fecha: string }[]> {
+  if (rutinaIds.length === 0) return [];
+  const huecos = rutinaIds.map(() => '?').join(', ');
+  return getDb().getAllAsync<{ rutina_id: string; fecha: string }>(
+    `SELECT rutina_id, fecha FROM evento
+     WHERE rutina_id IN (${huecos}) AND fecha BETWEEN ? AND ?`,
+    [...rutinaIds, desde, hasta],
+  );
+}
+
+/**
+ * Borra las ocurrencias futuras de una rutina y devuelve cuantas borro.
+ * `desde` es ISO 8601 con offset local, comparado como texto contra
+ * fecha_hora_inicio: lo pasado queda intacto, que es todo el punto.
+ */
+export async function eliminarEventosFuturosDeRutina(
+  rutinaId: string,
+  desde: string,
+): Promise<number> {
+  const r = await getDb().runAsync(
+    'DELETE FROM evento WHERE rutina_id = ? AND fecha_hora_inicio >= ?',
+    [rutinaId, desde],
+  );
+  return r.changes;
 }

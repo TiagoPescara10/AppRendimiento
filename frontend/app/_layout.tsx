@@ -16,7 +16,7 @@ type Destino = 'onboarding' | 'muro' | 'app';
 const PERMITIDO: Record<Destino, string[]> = {
   onboarding: ['onboarding'],
   muro: ['onboarding', '(auth)'],
-  app: ['(tabs)', 'playground'],
+  app: ['(tabs)', 'playground', 'comida', 'evento'],
 };
 
 export default function RootLayout() {

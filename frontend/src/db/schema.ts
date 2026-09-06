@@ -128,7 +128,34 @@ export interface EventoRow {
   duracion_estimada_min: number | null;
   intensidad: Intensidad;
   completado: Bool01;
+  /**
+   * Si el usuario ya contesto por este evento. Separa "no lo hice" (respondido
+   * 1, completado 0) de "todavia no conteste" (respondido 0), que antes eran
+   * el mismo 0 en `completado`.
+   */
+  respondido: Bool01;
   notas: string | null;
+  /** null si el evento se creo suelto. Apunta a la rutina que lo genero. */
+  rutina_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Regla semanal que se materializa como filas de `evento`. No es la ocurrencia:
+ * `completado` y el temporizador viven en el evento, no aca.
+ */
+export interface RutinaRow {
+  id: string;
+  usuario_id: string;
+  /** 0 = domingo, 6 = sabado. Mismo criterio que Date.getDay(). */
+  dia_semana: number;
+  /** "08:30", hora local. El CHECK del DDL exige el padding. */
+  hora: string;
+  tipo: TipoEvento;
+  duracion_estimada_min: number | null;
+  intensidad: Intensidad;
+  activa: Bool01;
   created_at: string;
   updated_at: string;
 }
