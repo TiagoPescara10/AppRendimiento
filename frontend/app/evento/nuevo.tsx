@@ -239,15 +239,16 @@ export default function NuevoEvento() {
           value={cuando}
           mode={picker}
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onValueChange={(evento, nueva) => {
-            // Android: dialogo modal, dispara una vez al confirmar o cancelar.
+          // onValueChange solo llega cuando el usuario ELIGE algo; cancelar
+          // sale por onDismiss. Antes las dos cosas venian juntas por onChange
+          // y habia que separarlas mirando event.type.
+          onValueChange={(_, nueva) => {
+            // Android: dialogo modal, dispara una sola vez, al confirmar.
             // iOS: inline, dispara en cada giro; lo cierra el boton "Listo".
-            if (Platform.OS === 'android') {
-              setPicker(null);
-              if (evento.type === 'dismissed') return;
-            }
-            if (nueva) setCuando(nueva);
+            if (Platform.OS === 'android') setPicker(null);
+            setCuando(nueva);
           }}
+          onDismiss={() => setPicker(null)}
         />
       )}
       {picker && Platform.OS === 'ios' && (

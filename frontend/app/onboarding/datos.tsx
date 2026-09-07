@@ -107,20 +107,20 @@ export default function Datos() {
             themeVariant="light"
             textColor={colors.textPrimary}
             accentColor={colors.action}
-            onValueChange={(evento, nueva) => {
-              // Android: el picker es un dialogo modal y onChange dispara una
-              // sola vez, al confirmar o cancelar.
+            // onValueChange solo llega cuando el usuario ELIGE una fecha, y
+            // cancelar sale por onDismiss. Eso resuelve solo lo que antes
+            // habia que atajar a mano: con onChange, cancelar llegaba por el
+            // mismo camino y con la fecha original, asi que sin mirar
+            // event.type cancelar equivalia a aceptar.
+            onValueChange={(_, nueva) => {
+              // Android: dialogo modal, dispara una sola vez, al confirmar.
               // iOS: es inline y dispara en CADA giro de la rueda, asi que
               // cerrarlo aca lo mataria apenas el usuario lo toca. En iOS lo
               // cierra el boton "Listo" de abajo.
-              if (Platform.OS === 'android') {
-                setAbierto(false);
-                // Cancelar tambien llega por onChange, con la fecha original.
-                // Sin esto, cancelar equivale a aceptar.
-                if (evento.type === 'dismissed') return;
-              }
-              if (nueva) setFechaNacimiento(nueva);
+              if (Platform.OS === 'android') setAbierto(false);
+              setFechaNacimiento(nueva);
             }}
+            onDismiss={() => setAbierto(false)}
           />
           {Platform.OS === 'ios' && (
             <Boton titulo="Listo" variante="secundario" onPress={() => setAbierto(false)} />
