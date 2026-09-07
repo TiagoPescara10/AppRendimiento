@@ -86,13 +86,13 @@ export default function DiaAgenda() {
     ]);
   };
 
+  /**
+   * Al temporizador. No se marca nada aca: el evento queda hecho cuando la
+   * sesion termina de verdad, y de eso se encarga la pantalla del temporizador.
+   * Si el usuario abandona a la mitad, no tiene que quedar rastro.
+   */
   const empezar = (id: string) => {
-    // TODO: cuando exista el temporizador, esto navega ahi y el evento se
-    // marca al terminar la sesion, no al arrancarla.
-    Alert.alert('Próximamente', 'El temporizador todavía no está listo.', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Marcar como hecho', onPress: () => marcar(id, true) },
-    ]);
+    router.push({ pathname: '/evento/temporizador', params: { id } });
   };
 
   if (cargando) {
