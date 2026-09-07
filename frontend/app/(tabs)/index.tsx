@@ -281,7 +281,10 @@ const estilos = StyleSheet.create({
   fecha: { fontSize: fontSize.small, color: colors.textSecondary },
 
   destacado: {
-    backgroundColor: colors.surfaceAlt,
+    // Blanco, no surfaceAlt: es la card principal del dashboard y el esquema
+    // dice que el contenido va en blanco. En crema sobre crema casi no se
+    // despegaba del lienzo.
+    backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: spacing.lg,
     alignItems: 'center',
