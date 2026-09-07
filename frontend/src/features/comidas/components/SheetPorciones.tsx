@@ -17,7 +17,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 import type { PorcionTipica } from '@/db/schema';
 
 const MULTIPLICADOR_MAX = 20;
@@ -164,13 +164,14 @@ const estilos = StyleSheet.create({
   nombre: { fontSize: fontSize.body, lineHeight: lineHeight.body, color: colors.textPrimary },
   detalle: { fontSize: fontSize.small, lineHeight: lineHeight.small, color: colors.textSecondary },
 
-  fondo: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  fondo: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
   sheet: {
     backgroundColor: colors.bg,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     padding: spacing.lg,
     paddingBottom: spacing.xxxl,
+    ...shadow.sheet,
     gap: spacing.sm,
   },
   agarre: {
@@ -219,6 +220,7 @@ const estilos = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.surface,
+    ...shadow.card,
   },
   opcionActiva: { borderWidth: 1.5, borderColor: colors.action },
 

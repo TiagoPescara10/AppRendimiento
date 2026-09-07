@@ -13,7 +13,7 @@ import { useState, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet, Modal, ScrollView, Alert } from 'react-native';
 
 import { Boton } from '@/ui/Boton';
-import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 
 import { listarEventosSinResponder, responderEvento } from '@/db/queries/eventos';
 import { ETIQUETA_TIPO, horaDe, partesFecha } from '@/features/agenda/formato';
@@ -148,6 +148,7 @@ const estilos = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     gap: spacing.sm,
+    ...shadow.sheet,
   },
   titulo: {
     fontSize: fontSize.subtitle,

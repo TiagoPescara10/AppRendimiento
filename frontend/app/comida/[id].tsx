@@ -19,7 +19,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Pantalla } from '@/ui/Pantalla';
 import { SheetPorciones } from '@/features/comidas/components/SheetPorciones';
 import type { DatosSheet } from '@/features/comidas/components/SheetPorciones';
-import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 
 import {
   obtenerComida,
@@ -287,6 +287,7 @@ const estilos = StyleSheet.create({
     padding: spacing.md,
     backgroundColor: colors.surface,
     borderRadius: radius.md,
+    ...shadow.card,
   },
   derecha: { alignItems: 'flex-end' },
   unidad: { fontSize: fontSize.small, color: colors.textSecondary },

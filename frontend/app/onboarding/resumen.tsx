@@ -7,7 +7,7 @@ import { Card } from '@/ui/Card';
 import { ultimoPeso } from '@/db/queries/peso';
 import { calcularTodo } from '@/lib/nutricion';
 import { calcularEdad } from '@/lib/fechas';
-import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 
 const NIVELES: Record<string, string> = {
   sedentario: 'Sedentaria',
@@ -134,6 +134,7 @@ const estilos = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     alignItems: 'center',
+    ...shadow.card,
   },
   destacadoLabel: {
     fontSize: fontSize.small,
@@ -156,6 +157,7 @@ const estilos = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.md,
     alignItems: 'center',
+    ...shadow.card,
   },
   macroLabel: {
     fontSize: fontSize.small,

@@ -11,7 +11,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
-import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 
 import { listarEventosPorFecha, marcarCompletado, eliminarEvento } from '@/db/queries/eventos';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
@@ -202,6 +202,7 @@ const estilos = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.md,
     gap: spacing.md,
+    ...shadow.card,
   },
   cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
 

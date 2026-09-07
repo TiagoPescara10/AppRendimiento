@@ -1,7 +1,7 @@
 
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
-import { colors, spacing, radius, fontSize, lineHeight } from './theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow } from './theme';
 
 // El generico <T> hace que `valor` y `onChange` compartan el mismo tipo.
 // Asi, si le pasas opciones con valor 'bajar' | 'subir', TypeScript te
@@ -89,9 +89,14 @@ const estilos = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.lg,
     backgroundColor: colors.surface,
+    ...shadow.card,
+    borderRadius: radius.lg,
+    // El borde hairline se queda aunque la separacion ahora la de la sombra:
+    // `seleccionada` sube a 1.5 y en RN el borde ocupa lugar. Sin una base de
+    // 0.5, elegir una opcion la correria 1.5px en vez de 1. La separacion la
+    // hace la sombra; esto es geometria.
     borderWidth: 0.5,
     borderColor: colors.border,
-    borderRadius: radius.lg,
   },
   separacion: {
     marginBottom: spacing.sm,

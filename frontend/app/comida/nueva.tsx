@@ -11,7 +11,7 @@ import { Input } from '@/ui/Input';
 import { Boton } from '@/ui/Boton';
 import { SheetPorciones } from '@/features/comidas/components/SheetPorciones';
 import type { DatosSheet } from '@/features/comidas/components/SheetPorciones';
-import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 
 import { buscarAlimentosPorNombre } from '@/db/queries/alimentos';
 import type { Alimento } from '@/db/queries/alimentos';
@@ -351,6 +351,7 @@ const estilos = StyleSheet.create({
     padding: spacing.md,
     backgroundColor: colors.surface,
     borderRadius: radius.md,
+    ...shadow.card,
   },
   derecha: { alignItems: 'flex-end' },
   unidad: { fontSize: fontSize.small, color: colors.textSecondary },
@@ -370,13 +371,14 @@ const estilos = StyleSheet.create({
   macros: { flexDirection: 'row', gap: spacing.md },
 
   // Estilos del modal del selector de tipo.
-  fondo: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  fondo: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
   sheet: {
     backgroundColor: colors.bg,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     padding: spacing.lg,
     paddingBottom: spacing.xxxl,
+    ...shadow.sheet,
     gap: spacing.sm,
   },
   agarre: {
@@ -400,6 +402,7 @@ const estilos = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.surface,
+    ...shadow.card,
   },
   opcionActiva: { borderWidth: 1.5, borderColor: colors.action },
 });

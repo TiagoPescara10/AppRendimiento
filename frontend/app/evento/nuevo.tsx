@@ -9,7 +9,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
-import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 
 import { crearEvento } from '@/db/queries/eventos';
 import { crearRutina } from '@/db/queries/rutinas';
@@ -429,13 +429,14 @@ const estilos = StyleSheet.create({
     color: colors.textSecondary,
   },
 
-  fondo: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  fondo: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
   sheet: {
     backgroundColor: colors.bg,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     padding: spacing.lg,
     paddingBottom: spacing.xxxl,
+    ...shadow.sheet,
     gap: spacing.md,
   },
   agarre: {

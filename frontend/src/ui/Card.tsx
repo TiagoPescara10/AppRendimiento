@@ -1,6 +1,6 @@
 import { View, StyleSheet } from 'react-native';
 import type { ViewProps } from 'react-native';
-import { colors, spacing, radius } from './theme';
+import { colors, spacing, radius, shadow } from './theme';
 
 export function Card({ style, children, ...props }: ViewProps) {
   return (
@@ -11,11 +11,13 @@ export function Card({ style, children, ...props }: ViewProps) {
 }
 
 const estilos = StyleSheet.create({
+  // El blanco sobre el crema ya insinua la card; la sombra la despega.
+  // Antes esto era un borde de 0.5px, que sobre un fondo casi blanco era la
+  // unica forma de marcar el limite.
   card: {
     backgroundColor: colors.surface,
-    borderWidth: 0.5,
-    borderColor: colors.border,
     borderRadius: radius.lg,
     padding: spacing.lg,
+    ...shadow.card,
   },
 });

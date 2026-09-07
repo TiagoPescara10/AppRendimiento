@@ -11,7 +11,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
-import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 
 import { calcularTodo } from '@/lib/nutricion';
 import type { ResultadoNutricional } from '@/lib/nutricion';
@@ -285,6 +285,7 @@ const estilos = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.lg,
     alignItems: 'center',
+    ...shadow.card,
   },
   destacadoLabel: {
     fontSize: fontSize.small,
@@ -316,6 +317,7 @@ const estilos = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.md,
     gap: spacing.xs,
+    ...shadow.card,
   },
   macroLabel: { fontSize: fontSize.small, color: colors.textSecondary },
   macroValor: { fontSize: fontSize.body, fontWeight: '500', color: colors.textPrimary },

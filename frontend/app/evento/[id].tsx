@@ -12,7 +12,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
-import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 
 import { obtenerEvento, marcarCompletado, eliminarEvento } from '@/db/queries/eventos';
 import { ETIQUETA_TIPO, ETIQUETA_INTENSIDAD, horaDe, partesFecha } from '@/features/agenda/formato';
@@ -191,6 +191,7 @@ const estilos = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.md,
     gap: spacing.sm,
+    ...shadow.card,
   },
   fila: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   valor: { fontSize: fontSize.body, lineHeight: lineHeight.body, color: colors.textPrimary },

@@ -1,6 +1,6 @@
 import { View, Text, Pressable, StyleSheet, Alert, Platform } from 'react-native';
 import { useRef, useState } from 'react';
-import { colors, spacing, radius, fontSize, sizes } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, sizes, shadow } from '@/ui/theme';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Input } from '@/ui/Input';
 import { aFechaLocal } from '@/lib/fechas';
@@ -163,6 +163,7 @@ const estilos = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.md,
     overflow: 'hidden',
+    ...shadow.card,
   },
   campoFecha: {
     height: sizes.control,          
