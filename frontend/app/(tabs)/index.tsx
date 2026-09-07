@@ -9,9 +9,11 @@ import { useState, useCallback } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 
+import { Ionicons } from '@expo/vector-icons';
+
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
-import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, fontWeight, lineHeight, shadow, sizes } from '@/ui/theme';
 
 import { calcularTodo } from '@/lib/nutricion';
 import type { ResultadoNutricional } from '@/lib/nutricion';
@@ -28,7 +30,13 @@ import { calcularEdad, aFechaLocal } from '@/lib/fechas';
 
 type Macros = { kcal: number; prot: number; carb: number; grasa: number };
 
-type ComidaResumen = { id: string; tipo: TipoComida; kcal: number };
+type ComidaResumen = {
+  id: string;
+  tipo: TipoComida;
+  kcal: number;
+  /** Los primeros nombres nomas: la fila es un resumen, no la lista completa. */
+  alimentos: string[];
+};
 
 /**
  * Un solo objeto de estado en vez de cinco useState sueltos: asi la pantalla
@@ -43,6 +51,9 @@ type Estado = {
 };
 
 const VACIO: Macros = { kcal: 0, prot: 0, carb: 0, grasa: 0 };
+
+/** Cuantos alimentos se nombran por fila antes de cortar. */
+const MAX_ALIMENTOS = 3;
 
 function capitalizar(texto: string): string {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
@@ -126,6 +137,10 @@ export default function Dashboard() {
             kcal: Math.round(
               items.reduce((s, it) => s + (it.kcal_por_100g * it.cantidad_g) / 100, 0),
             ),
+            // Se corta aca y no al renderizar: la fila entra en una linea y
+            // con tres nombres ya se entiende que comio. Sin puntos
+            // suspensivos, que no agregan nada.
+            alimentos: items.slice(0, MAX_ALIMENTOS).map((it) => it.alimento_nombre),
           })),
         });
       })().catch((e) => console.error('Error al cargar el dashboard:', e));
@@ -205,24 +220,57 @@ export default function Dashboard() {
 
       <Text style={estilos.seccion}>Comiste</Text>
 
-      {comidas.length === 0 ? (
-        <View style={estilos.vacio}>
-          <Text style={estilos.detalle}>Todavía no registraste nada hoy.</Text>
-        </View>
-      ) : (
-        comidas.map((c) => (
-          <Pressable
-            key={c.id}
-            style={estilos.comida}
-            onPress={() => router.push(`/comida/${c.id}`)}
-          >
-            <Text style={[estilos.comidaTipo, estilos.flex]}>{capitalizar(c.tipo)}</Text>
-            <Text style={estilos.comidaKcal}>{c.kcal}</Text>
-          </Pressable>
-        ))
-      )}
+      {/* Todo adentro de una card: se lee como un bloque y no como items
+          flotando sobre el lienzo. Solo aparecen las comidas registradas; las
+          que faltan no se listan en gris, porque se leen como un reproche. */}
+      <View style={estilos.card}>
+        {comidas.length === 0 ? (
+          <View style={estilos.vacio}>
+            <Text style={estilos.detalle}>Todavía no registraste nada hoy.</Text>
+          </View>
+        ) : (
+          comidas.map((c, i) => (
+            <Pressable
+              key={c.id}
+              style={({ pressed }) => [
+                estilos.comida,
+                // El separador va ADENTRO de la card, y la ultima fila no lleva.
+                i < comidas.length - 1 && estilos.comidaSeparador,
+                pressed && estilos.comidaPresionada,
+              ]}
+              onPress={() => router.push(`/comida/${c.id}`)}
+            >
+              <View style={estilos.flex}>
+                <Text style={estilos.comidaTipo}>{capitalizar(c.tipo)}</Text>
+                {c.alimentos.length > 0 && (
+                  <Text style={estilos.comidaAlimentos} numberOfLines={1}>
+                    {c.alimentos.join(', ')}
+                  </Text>
+                )}
+              </View>
+              <Text style={estilos.comidaKcal}>{c.kcal}</Text>
+            </Pressable>
+          ))
+        )}
+      </View>
 
-      <Boton titulo="Registrar comida" onPress={() => router.push('/comida/nueva')} />
+      {/* Entrenar va aca y no escondido: el temporizador sirve para el
+          entrenamiento propio, y hasta ahora solo se llegaba desde un evento
+          agendado, que es justo cuando no hace falta. */}
+      <View style={estilos.acciones}>
+        <BotonAccion
+          titulo="Registrar comida"
+          icono="restaurant-outline"
+          variante="primario"
+          onPress={() => router.push('/comida/nueva')}
+        />
+        <BotonAccion
+          titulo="Entrenar"
+          icono="barbell-outline"
+          variante="secundario"
+          onPress={() => router.push('/evento/temporizador')}
+        />
+      </View>
 
       {/* --- SOLO DESARROLLO: sacar antes de publicar --- */}
       <Boton
@@ -235,6 +283,53 @@ export default function Dashboard() {
           ni sobre el registro. Se muestra una sola vez por sesion de app. */}
       <CartelPendientes usuarioId={usuarioId} />
     </Pantalla>
+  );
+}
+
+/**
+ * Boton grande del dashboard: icono arriba, texto abajo.
+ *
+ * No sale de ui/Boton porque ese es de una sola linea y altura fija; estos dos
+ * van apilados, del mismo ancho y uno al lado del otro.
+ */
+function BotonAccion({
+  titulo,
+  icono,
+  variante,
+  onPress,
+}: {
+  titulo: string;
+  icono: keyof typeof Ionicons.glyphMap;
+  variante: 'primario' | 'secundario';
+  onPress: () => void;
+}) {
+  const primario = variante === 'primario';
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        estilos.accion,
+        primario ? estilos.accionPrimaria : estilos.accionSecundaria,
+        pressed &&
+          (primario ? estilos.accionPrimariaPresionada : estilos.accionSecundariaPresionada),
+      ]}
+    >
+      <Ionicons
+        name={icono}
+        size={sizes.icon}
+        color={primario ? colors.textOnAction : colors.action}
+      />
+      <Text
+        style={[
+          estilos.accionTexto,
+          primario ? estilos.accionTextoPrimario : estilos.accionTextoSecundario,
+        ]}
+      >
+        {titulo}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -341,15 +436,56 @@ const estilos = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: spacing.md,
   },
+  // La card de comidas. Sin padding vertical: lo pone cada fila, asi los
+  // separadores llegan de lado a lado del interior.
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    ...shadow.card,
+  },
   comida: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.md,
-    borderBottomWidth: 0.5,
+    gap: spacing.md,
+  },
+  comidaSeparador: {
+    borderBottomWidth: sizes.hairline,
     borderBottomColor: colors.border,
   },
+  comidaPresionada: { opacity: 0.6 },
   comidaTipo: { fontSize: fontSize.body, color: colors.textPrimary },
+  comidaAlimentos: {
+    fontSize: fontSize.caption,
+    lineHeight: lineHeight.caption,
+    color: colors.textSecondary,
+  },
   comidaKcal: { fontSize: fontSize.body, color: colors.textPrimary },
+
+  // Los dos botones: mismo ancho (flex 1) y el icono arriba del texto.
+  acciones: { flexDirection: 'row', gap: spacing.sm },
+  accion: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  accionPrimaria: { backgroundColor: colors.action },
+  accionPrimariaPresionada: { backgroundColor: colors.actionPressed },
+  // Borde de accion, no de border: tiene que leerse como el par del primario
+  // y no como una card mas.
+  accionSecundaria: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.action,
+  },
+  accionSecundariaPresionada: { backgroundColor: colors.surfaceAlt },
+  accionTexto: { fontSize: fontSize.small, fontWeight: fontWeight.medium },
+  accionTextoPrimario: { color: colors.textOnAction },
+  accionTextoSecundario: { color: colors.action },
 
   vacio: { paddingVertical: spacing.xl, alignItems: 'center' },
   detalle: { fontSize: fontSize.small, lineHeight: lineHeight.small, color: colors.textSecondary },
