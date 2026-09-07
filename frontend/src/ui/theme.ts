@@ -144,6 +144,16 @@ export const colors = {
   faseDescansoBloque: palette.stone700,
   textOnFase: palette.white,
 
+  // Blancos translucidos para lo DECORATIVO sobre el fondo de fase: la pista
+  // del anillo, los segmentos vacios, los puntitos apagados.
+  //
+  // Solo decorativo, nunca texto. Sobre faseDescanso el blanco pleno ya es el
+  // techo con 5.02:1, asi que cualquier translucidez cae abajo de AA: al 72%
+  // da 3.39 y hay que llegar al 95% para pasar, punto en el que ya no se ve
+  // translucido. El texto sobre la fase va con textOnFase, pleno.
+  onFaseMedio: 'rgba(255, 255, 255, 0.55)',
+  onFaseTenue: 'rgba(255, 255, 255, 0.24)',
+
   // overlay de los modales. Tintado calido por lo mismo que las sombras.
   overlay: 'rgba(50, 40, 20, 0.5)',
 } as const;

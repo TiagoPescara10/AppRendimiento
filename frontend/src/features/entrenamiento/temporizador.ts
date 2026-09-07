@@ -102,6 +102,70 @@ export const CONFIG_CRONOMETRO: ConfigTemporizador = {
 };
 
 // ---------------------------------------------------------------------------
+// Presets
+//
+// Nadie arma 6 bloques x 8 pasadas a fuerza de toques cada vez que entrena.
+// Viven aca y no en la pantalla porque son configuracion, no dibujo.
+// ---------------------------------------------------------------------------
+
+export interface Preset {
+  id: string;
+  nombre: string;
+  config: ConfigTemporizador;
+}
+
+export const PRESETS: readonly Preset[] = [
+  {
+    id: 'tabata',
+    nombre: 'Tabata',
+    config: { bloques: 1, pasadas: 8, trabajoSeg: 20, descansoSeg: 10, descansoBloqueSeg: 0 },
+  },
+  {
+    id: 'pasadas',
+    nombre: 'Pasadas',
+    config: { bloques: 6, pasadas: 8, trabajoSeg: 20, descansoSeg: 20, descansoBloqueSeg: 90 },
+  },
+  {
+    id: 'series',
+    nombre: 'Series',
+    config: { bloques: 4, pasadas: 1, trabajoSeg: 45, descansoSeg: 90, descansoBloqueSeg: 0 },
+  },
+  {
+    id: 'cronometro',
+    nombre: 'Cronómetro',
+    config: CONFIG_CRONOMETRO,
+  },
+] as const;
+
+/**
+ * Que preset representa esta config, o null si no coincide con ninguno.
+ *
+ * El cronometro se reconoce por trabajoSeg = 0 y no por igualdad de los cinco
+ * campos, a diferencia del resto. Es la misma razon por la que existe
+ * esCronometro(): con el trabajo sin limite nunca se llega a una segunda fase,
+ * asi que bloques, pasadas y descansos no cambian en nada la sesion. Exigir
+ * igualdad estricta dejaria el chip sin marcar al entrar al cronometro desde
+ * una config de 6 bloques, aunque lo que va a correr sea identico.
+ */
+export function presetActivo(c: ConfigTemporizador): string | null {
+  if (esCronometro(c)) return 'cronometro';
+
+  const n = normalizarConfig(c);
+  const igual = PRESETS.find(
+    (p) =>
+      !esCronometro(p.config) &&
+      p.config.bloques === n.bloques &&
+      p.config.pasadas === n.pasadas &&
+      p.config.trabajoSeg === n.trabajoSeg &&
+      p.config.descansoSeg === n.descansoSeg &&
+      // El descanso de bloque no se compara cuando hay un solo bloque: nunca
+      // llega a usarse, asi que su valor no distingue una sesion de otra.
+      (n.bloques === 1 || p.config.descansoBloqueSeg === n.descansoBloqueSeg),
+  );
+  return igual ? igual.id : null;
+}
+
+// ---------------------------------------------------------------------------
 // El plan
 // ---------------------------------------------------------------------------
 

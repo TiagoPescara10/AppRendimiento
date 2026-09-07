@@ -19,19 +19,22 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
 import { Card } from '@/ui/Card';
-import { colors, spacing, fontSize, lineHeight, fontWeight } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, fontWeight, sizes } from '@/ui/theme';
 
 import { responderEvento } from '@/db/queries/eventos';
 import { FilaNumero } from '@/features/entrenamiento/components/FilaNumero';
+import { Anillo } from '@/features/entrenamiento/components/Anillo';
+import { VistaPrevia } from '@/features/entrenamiento/components/VistaPrevia';
 import {
   CONFIG_POR_DEFECTO,
   ETIQUETA_FASE,
+  PRESETS,
+  presetActivo,
   ajustarConfig,
   construirPlan,
   duracionTotalMs,
   esCronometro,
   estaPausado,
-  etiquetaProgreso,
   formatearSegundos,
   iniciarReloj,
   pausarReloj,
@@ -99,6 +102,9 @@ export default function Temporizador() {
   const [totalFinalMs, setTotalFinalMs] = useState(0);
 
   const cronometro = esCronometro(config);
+  // Se recalcula en cada render en vez de guardarse: asi tocar un +/- desmarca
+  // el chip solo, sin que nadie tenga que acordarse de limpiarlo.
+  const activoId = presetActivo(config);
   const pausado = !!reloj && estaPausado(reloj);
   const corriendo = !!reloj && !finalizada;
 
@@ -123,6 +129,27 @@ export default function Temporizador() {
 
   const transcurrido = reloj ? transcurridoMs(reloj, ahora) : 0;
   const pos = useMemo(() => posicionEn(plan, transcurrido), [plan, transcurrido]);
+
+  /**
+   * De cuando a cuando va cada bloque. Se deriva del plan, que ya trae los
+   * offsets: es lo que permite llenar el segmento del bloque actual en
+   * proporcion en vez de dejarlo a medias siempre.
+   *
+   * Depende solo del plan y no del tiempo, asi que se calcula una vez por
+   * sesion y no en cada tick.
+   */
+  const tramos = useMemo(() => {
+    const porBloque = new Map<number, { desde: number; hasta: number }>();
+    for (const f of plan) {
+      const fin = f.hastaMs ?? f.desdeMs;
+      const actual = porBloque.get(f.bloque);
+      if (!actual) porBloque.set(f.bloque, { desde: f.desdeMs, hasta: fin });
+      else actual.hasta = Math.max(actual.hasta, fin);
+    }
+    return [...porBloque.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([numero, r]) => ({ numero, ...r }));
+  }, [plan]);
 
   // --- sonido -------------------------------------------------------------
 
@@ -187,6 +214,13 @@ export default function Temporizador() {
 
   const cambiar = (campo: CampoConfig, delta: number) => {
     setConfig((c) => ajustarConfig(c, campo, c[campo] + delta));
+  };
+
+  // Lo escrito a mano entra por el mismo lugar que los +/-: ajustarConfig ya
+  // acota contra LIMITES, asi que un 9999 queda en el maximo y no hay nada
+  // que validar aca.
+  const escribir = (campo: CampoConfig, n: number) => {
+    setConfig((c) => ajustarConfig(c, campo, n));
   };
 
   const empezar = async () => {
@@ -273,16 +307,94 @@ export default function Temporizador() {
         ? formatearSegundos(segundosTranscurridos(pos.llevaMs))
         : formatearSegundos(segundosRestantes(pos.restanteMs));
 
-    const progreso = etiquetaProgreso(fase, config);
+    // Cuanto queda de la fase, de 1 a 0. En el cronometro no hay proporcion
+    // que mostrar —la fase es abierta— y el anillo no se dibuja.
+    const fraccion =
+      pos.restanteMs !== null && fase.duracionMs
+        ? Math.min(1, Math.max(0, pos.restanteMs / fase.duracionMs))
+        : null;
+
+    // Lo que falta de la sesion entera. null en el cronometro, que no tiene
+    // final propio.
+    const totalMs = duracionTotalMs(plan);
+    const restanteTotal = totalMs === null ? null : Math.max(0, totalMs - transcurrido);
 
     return (
       <Pantalla scroll={false} fondo={FONDO_FASE[fase.tipo]} style={estilos.corriendo}>
+        {/* Contexto: en que bloque estoy y cuanto falta para terminar todo.
+            El cronometro no tiene ni bloques ni final, asi que no dibuja nada
+            en vez de dejar una fila vacia ocupando alto. */}
+        <View style={estilos.contexto}>
+          {(config.bloques > 1 || restanteTotal !== null) && (
+            <View style={estilos.contextoFila}>
+              {config.bloques > 1 && (
+                <Text style={estilos.contextoTexto}>
+                  Bloque {fase.bloque} de {config.bloques}
+                </Text>
+              )}
+              {restanteTotal !== null && (
+                <Text
+                  style={[estilos.contextoTexto, estilos.contextoDerecha]}
+                  allowFontScaling={false}
+                >
+                  {formatearSegundos(segundosRestantes(restanteTotal))} restantes
+                </Text>
+              )}
+            </View>
+          )}
+
+          {tramos.length > 1 && (
+            <View style={estilos.segmentos}>
+              {tramos.map((t) => {
+                // Llenado real y no "medio lleno": el segmento del bloque en
+                // curso avanza con el, asi que la barra tambien dice cuanto
+                // falta DENTRO del bloque, no solo cuantos van.
+                const largo = t.hasta - t.desde;
+                const llenado =
+                  largo <= 0 ? 0 : Math.min(1, Math.max(0, (transcurrido - t.desde) / largo));
+
+                return (
+                  <View key={t.numero} style={estilos.segmento}>
+                    {llenado > 0 && (
+                      <View style={[estilos.segmentoLleno, { flex: llenado }]} />
+                    )}
+                    {llenado < 1 && <View style={{ flex: 1 - llenado }} />}
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
+
         <View style={estilos.centro}>
           <Text style={estilos.fase}>{pausado ? 'En pausa' : ETIQUETA_FASE[fase.tipo]}</Text>
-          <Text style={estilos.numero} allowFontScaling={false}>
-            {numero}
-          </Text>
-          {progreso ? <Text style={estilos.progreso}>{progreso}</Text> : null}
+
+          <Anillo numero={numero} fraccion={fraccion} />
+
+          {config.pasadas > 1 && (
+            <>
+              <Text style={estilos.progreso}>
+                Pasada {fase.pasada} de {config.pasadas}
+              </Text>
+              {/* Los puntitos son la misma idea que la barra de bloques a otra
+                  escala: cuantas van y cual es la de ahora. */}
+              <View style={estilos.puntos}>
+                {Array.from({ length: config.pasadas }, (_, i) => {
+                  const n = i + 1;
+                  return (
+                    <View
+                      key={n}
+                      style={[
+                        estilos.punto,
+                        n < fase.pasada && estilos.puntoHecho,
+                        n === fase.pasada && estilos.puntoActual,
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+            </>
+          )}
         </View>
 
         <View style={estilos.acciones}>
@@ -323,13 +435,41 @@ export default function Temporizador() {
         <Text style={estilos.titulo}>Temporizador</Text>
       </View>
 
+      {/* Los presets primero: casi siempre uno de estos es lo que se busca, y
+          los +/- de abajo quedan para ajustar sobre esa base. */}
+      <View style={estilos.presets}>
+        {PRESETS.map((preset) => {
+          const activo = preset.id === activoId;
+          return (
+            <Pressable
+              key={preset.id}
+              onPress={() => setConfig(preset.config)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: activo }}
+              style={({ pressed }) => [
+                estilos.chip,
+                activo && estilos.chipActivo,
+                pressed && !activo && estilos.chipPresionado,
+              ]}
+            >
+              <Text style={[estilos.chipTexto, activo && estilos.chipTextoActivo]}>
+                {preset.nombre}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       <Card style={estilos.tarjeta}>
         <FilaNumero
           etiqueta="Trabajo"
-          valor={cronometro ? 'Libre' : `${config.trabajoSeg} s`}
+          valor={config.trabajoSeg}
+          sufijo="s"
+          textoFijo={cronometro ? 'Libre' : undefined}
           ayuda="Segundos de esfuerzo"
           onBajar={() => cambiar('trabajoSeg', -PASO_SEG)}
           onSubir={() => cambiar('trabajoSeg', PASO_SEG)}
+          onEscribir={(n) => escribir('trabajoSeg', n)}
           puedeBajar={!cronometro}
           atajo={{
             titulo: 'Sin límite (cronómetro)',
@@ -349,35 +489,41 @@ export default function Temporizador() {
           <>
             <FilaNumero
               etiqueta="Descanso"
-              valor={`${config.descansoSeg} s`}
+              valor={config.descansoSeg}
+              sufijo="s"
               ayuda="Entre pasadas"
               onBajar={() => cambiar('descansoSeg', -PASO_SEG)}
               onSubir={() => cambiar('descansoSeg', PASO_SEG)}
+              onEscribir={(n) => escribir('descansoSeg', n)}
               puedeBajar={config.descansoSeg > 0}
             />
             <FilaNumero
               etiqueta="Pasadas"
-              valor={String(config.pasadas)}
+              valor={config.pasadas}
               ayuda="Repeticiones por bloque"
               onBajar={() => cambiar('pasadas', -1)}
               onSubir={() => cambiar('pasadas', 1)}
+              onEscribir={(n) => escribir('pasadas', n)}
               puedeBajar={config.pasadas > 1}
             />
             <FilaNumero
               etiqueta="Bloques"
-              valor={String(config.bloques)}
+              valor={config.bloques}
               ayuda="Veces que se repite la serie entera"
               onBajar={() => cambiar('bloques', -1)}
               onSubir={() => cambiar('bloques', 1)}
+              onEscribir={(n) => escribir('bloques', n)}
               puedeBajar={config.bloques > 1}
             />
             {config.bloques > 1 && (
               <FilaNumero
                 etiqueta="Descanso de bloque"
-                valor={`${config.descansoBloqueSeg} s`}
+                valor={config.descansoBloqueSeg}
+                sufijo="s"
                 ayuda="Entre un bloque y el siguiente"
                 onBajar={() => cambiar('descansoBloqueSeg', -PASO_SEG)}
                 onSubir={() => cambiar('descansoBloqueSeg', PASO_SEG)}
+                onEscribir={(n) => escribir('descansoBloqueSeg', n)}
                 puedeBajar={config.descansoBloqueSeg > 0}
               />
             )}
@@ -385,7 +531,7 @@ export default function Temporizador() {
         )}
       </Card>
 
-      <Text style={estilos.resumen}>{resumenPlan(config)}</Text>
+      <VistaPrevia config={config} resumen={resumenPlan(config)} />
 
       <Boton titulo="Empezar" onPress={empezar} ancho />
     </Pantalla>
@@ -407,36 +553,84 @@ const estilos = StyleSheet.create({
   },
 
   tarjeta: { gap: spacing.xs },
-  resumen: {
-    textAlign: 'center',
-    fontSize: fontSize.small,
-    lineHeight: lineHeight.small,
-    color: colors.textSecondary,
+
+  // --- presets ---
+  presets: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  chip: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    borderWidth: sizes.hairline,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
+  chipActivo: { backgroundColor: colors.action, borderColor: colors.action },
+  chipPresionado: { backgroundColor: colors.surfaceAlt },
+  chipTexto: { fontSize: fontSize.small, color: colors.textPrimary },
+  chipTextoActivo: { color: colors.textOnAction },
 
   // --- corriendo ---
   corriendo: { justifyContent: 'space-between' },
-  centro: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+
+  contexto: { gap: spacing.sm },
+  contextoFila: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  // Blanco pleno y no translucido: es texto. Sobre la fase de descanso el
+  // blanco puro ya es el techo de contraste con 5.02:1.
+  contextoTexto: {
+    fontSize: fontSize.small,
+    lineHeight: lineHeight.small,
+    color: colors.textOnFase,
+    fontVariant: ['tabular-nums'],
+  },
+
+  // marginLeft auto y no solo space-between: con un unico bloque la etiqueta
+  // de la izquierda no se dibuja, y space-between con un solo hijo lo manda al
+  // principio. El tiempo tiene que quedar siempre a la derecha.
+  contextoDerecha: { marginLeft: 'auto' },
+
+  segmentos: { flexDirection: 'row', gap: spacing.xs, height: 4 },
+  // Cada bloque ocupa lo mismo aunque dure distinto: la barra cuenta bloques,
+  // no tiempo. Para el tiempo esta el numero de arriba.
+  segmento: {
+    flex: 1,
+    flexDirection: 'row',
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+    backgroundColor: colors.onFaseTenue,
+  },
+  segmentoLleno: { backgroundColor: colors.textOnFase },
+
+  centro: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   fase: {
     fontSize: fontSize.title,
     lineHeight: lineHeight.title,
     fontWeight: fontWeight.medium,
     color: colors.textOnFase,
   },
-  numero: {
-    fontSize: fontSize.timer,
-    lineHeight: lineHeight.timer,
-    fontWeight: fontWeight.bold,
-    color: colors.textOnFase,
-    // Los digitos no cambian de ancho al pasar de 9 a 8: sin esto el numero
-    // se mueve solo en cada segundo.
-    fontVariant: ['tabular-nums'],
-  },
   progreso: {
     fontSize: fontSize.subtitle,
     lineHeight: lineHeight.subtitle,
     color: colors.textOnFase,
   },
+
+  puntos: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  punto: {
+    width: 6,
+    height: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.onFaseTenue,
+  },
+  puntoHecho: { backgroundColor: colors.onFaseMedio },
+  // El actual mas grande, no solo mas claro: se encuentra de reojo sin tener
+  // que comparar tonos.
+  puntoActual: {
+    width: 10,
+    height: 10,
+    borderRadius: radius.pill,
+    backgroundColor: colors.textOnFase,
+  },
+
   acciones: { flexDirection: 'row', gap: spacing.md },
 
   // --- terminado ---
