@@ -5,6 +5,12 @@
 // mismas acciones, una sola fila. La diferencia real es que aca el borrado
 // deja la pantalla sin nada que mostrar, asi que vuelve atras en vez de
 // recargar.
+//
+// Si el entrenamiento se corrio con el temporizador, ademas del evento hay una
+// sesion con el detalle de lo que se hizo. Es el unico lugar que la lee. Los
+// eventos agendados a mano y los marcados desde el cartel de pendientes no
+// tienen sesion, y entonces esa card no se dibuja: una card vacia o un "sin
+// datos" ocuparia lugar para no decir nada.
 
 import { useState, useCallback } from 'react';
 import { View, Text, Pressable, StyleSheet, Alert, ActivityIndicator } from 'react-native';
@@ -15,8 +21,16 @@ import { Boton } from '@/ui/Boton';
 import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 
 import { obtenerEvento, marcarCompletado, eliminarEvento } from '@/db/queries/eventos';
+import { obtenerSesionPorEvento } from '@/db/queries/sesiones';
 import { ETIQUETA_TIPO, ETIQUETA_INTENSIDAD, horaDe, partesFecha } from '@/features/agenda/formato';
-import type { EventoRow } from '@/db/schema';
+import {
+  calcularRitmo,
+  esCronometro,
+  formatearDecimal,
+  formatearSegundos,
+} from '@/features/entrenamiento/temporizador';
+import type { ConfigTemporizador } from '@/features/entrenamiento/temporizador';
+import type { EventoRow, SesionEntrenamientoRow } from '@/db/schema';
 
 // ---------------------------------------------------------------------------
 // Pantalla
@@ -27,12 +41,18 @@ export default function DetalleEvento() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [evento, setEvento] = useState<EventoRow | null>(null);
+  // null tambien cuando el evento existe pero nunca se corrio con temporizador.
+  const [sesion, setSesion] = useState<SesionEntrenamientoRow | null>(null);
   const [cargando, setCargando] = useState(true);
 
   const cargar = useCallback(async () => {
     if (!id) return;
     try {
-      setEvento(await obtenerEvento(id));
+      // Las dos juntas: la sesion se busca por evento_id, asi que no depende
+      // de haber leido el evento primero.
+      const [e, s] = await Promise.all([obtenerEvento(id), obtenerSesionPorEvento(id)]);
+      setEvento(e);
+      setSesion(s);
     } catch (e) {
       console.error('Error al cargar el evento:', e);
       Alert.alert('Error', 'No se pudo cargar el evento.');
@@ -148,6 +168,9 @@ export default function DetalleEvento() {
         <Dato etiqueta="Estado" valor={hecho ? 'Completado' : 'Pendiente'} />
       </View>
 
+      {/* Solo si el entrenamiento se corrio con el temporizador. */}
+      {sesion && <DetalleSesion sesion={sesion} />}
+
       <Boton
         titulo={hecho ? 'Deshacer' : 'Marcar como hecho'}
         variante={hecho ? 'secundario' : 'primario'}
@@ -167,6 +190,91 @@ function Dato({ etiqueta, valor }: { etiqueta: string; valor: string }) {
     <View style={estilos.fila}>
       <Text style={estilos.detalle}>{etiqueta}</Text>
       <Text style={estilos.valor}>{valor}</Text>
+    </View>
+  );
+}
+
+/**
+ * "6 bloques", o "4 de 6 bloques" si quedo a medias.
+ *
+ * El "de" aparece solo cuando hay diferencia: en una sesion completa repetir
+ * el mismo numero dos veces es ruido. El plural sigue al numero mas grande,
+ * que es el que manda en "1 de 6 bloques".
+ */
+function conteo(hecho: number, planeado: number, singular: string, plural: string): string {
+  if (hecho === planeado) return `${hecho} ${hecho === 1 ? singular : plural}`;
+  return `${hecho} de ${planeado} ${planeado === 1 ? singular : plural}`;
+}
+
+/**
+ * Que se hizo de la estructura planeada.
+ *
+ * OJO con las unidades: `pasadas` es por bloque y `pasadas_completadas` es el
+ * total de la sesion, asi que lo planeado para comparar son bloques x pasadas.
+ * Ver el comentario de la columna en SesionEntrenamientoRow.
+ */
+function textoHecho(s: SesionEntrenamientoRow): string {
+  return [
+    conteo(s.bloques_completados, s.bloques, 'bloque', 'bloques'),
+    conteo(s.pasadas_completadas, s.bloques * s.pasadas, 'pasada', 'pasadas'),
+  ].join(' · ');
+}
+
+/** "20 s de trabajo · 20 s de descanso · 90 s entre bloques". */
+function textoConfig(s: SesionEntrenamientoRow): string {
+  const partes = [
+    `${s.trabajo_seg} s de trabajo`,
+    // Un 0 se dice con palabras: "0 s de descanso" se lee como un dato roto.
+    s.descanso_seg > 0 ? `${s.descanso_seg} s de descanso` : 'sin descanso',
+  ];
+  // El descanso de bloque solo existe si hay mas de un bloque: con uno solo
+  // nunca llega a usarse. Misma condicion que en presetActivo().
+  if (s.bloques > 1 && s.descanso_bloque_seg > 0) {
+    partes.push(`${s.descanso_bloque_seg} s entre bloques`);
+  }
+  return partes.join(' · ');
+}
+
+/**
+ * El detalle de lo que paso, en su propia card. Va aparte de la del evento a
+ * proposito: el evento es lo que se planeo, la sesion es lo que ocurrio.
+ */
+function DetalleSesion({ sesion }: { sesion: SesionEntrenamientoRow }) {
+  // Se reconstruye la config para poder usar los helpers puros del
+  // temporizador en vez de repetir sus reglas aca.
+  const config: ConfigTemporizador = {
+    bloques: sesion.bloques,
+    pasadas: sesion.pasadas,
+    trabajoSeg: sesion.trabajo_seg,
+    descansoSeg: sesion.descanso_seg,
+    descansoBloqueSeg: sesion.descanso_bloque_seg,
+  };
+  const cronometro = esCronometro(config);
+
+  // null si no hay distancia cargada, que es lo normal fuera del cronometro.
+  const ritmo = calcularRitmo(sesion.distancia_km, sesion.duracion_real_seg);
+
+  return (
+    <View style={estilos.card}>
+      <Text style={estilos.seccion}>La sesión</Text>
+
+      {/* Que se hizo y como estaba armado. El cronometro no dibuja ninguna de
+          las dos: es una sola fase abierta, asi que bloques, pasadas y
+          descansos son siempre 1, 1 y 0. Misma regla que etiquetaProgreso(). */}
+      {!cronometro && (
+        <>
+          <Text style={estilos.linea}>{textoHecho(sesion)}</Text>
+          <Text style={estilos.detalle}>{textoConfig(sesion)}</Text>
+        </>
+      )}
+
+      {/* Lo medido. Va en filas etiqueta/valor, como la card del evento. */}
+      <Dato etiqueta="Duración real" valor={formatearSegundos(sesion.duracion_real_seg)} />
+
+      {sesion.distancia_km !== null && (
+        <Dato etiqueta="Distancia" valor={`${formatearDecimal(sesion.distancia_km)} km`} />
+      )}
+      {ritmo && <Dato etiqueta="Ritmo" valor={`${ritmo.ritmoTexto} min/km`} />}
     </View>
   );
 }
@@ -195,6 +303,16 @@ const estilos = StyleSheet.create({
   },
   fila: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   valor: { fontSize: fontSize.body, lineHeight: lineHeight.body, color: colors.textPrimary },
+
+  seccion: {
+    fontSize: fontSize.small,
+    lineHeight: lineHeight.small,
+    fontWeight: '500',
+    color: colors.textSecondary,
+  },
+  // Linea de ancho completo, no una fila etiqueta/valor: el texto es largo y
+  // alineado a la derecha se cortaria.
+  linea: { fontSize: fontSize.body, lineHeight: lineHeight.body, color: colors.textPrimary },
 
   tag: {
     paddingVertical: 3,

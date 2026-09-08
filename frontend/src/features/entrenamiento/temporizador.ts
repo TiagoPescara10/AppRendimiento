@@ -409,3 +409,161 @@ export function resumenPlan(config: ConfigTemporizador): string {
 
   return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min en total`;
 }
+
+// ---------------------------------------------------------------------------
+// Lo que queda de una sesion terminada
+//
+// Todo esto es puro y sin dependencias, igual que el resto del archivo. Ese es
+// el motivo de que la intensidad no se importe de db/schema: scripts/
+// probar-temporizador.mjs compila ESTE SOLO archivo, sin shims de expo, y un
+// import a schema.ts arrastraria expo-sqlite y lo romperia.
+// ---------------------------------------------------------------------------
+
+/**
+ * Estructuralmente identico a `Intensidad` de db/schema, a proposito.
+ *
+ * Como son literales de string, lo que devuelve intensidadDe() es asignable a
+ * Intensidad sin conversion ni import. La duplicacion es la misma que ya
+ * existe entre los enums de schema.ts y los CHECK del DDL: si cambia una,
+ * cambia la otra.
+ */
+export type IntensidadSesion = 'baja' | 'media' | 'alta';
+
+/**
+ * Que tan dura fue la sesion, deducida del ratio trabajo/descanso.
+ *
+ * Se deduce y no se pregunta porque el unico momento en que se podria
+ * preguntar es justo cuando el usuario termino de entrenar, que es el peor
+ * momento posible para un formulario. La columna `intensidad` de evento es
+ * NOT NULL, asi que algo hay que poner, y el ratio es el mejor dato disponible
+ * sin molestar a nadie.
+ *
+ * Menos descanso que trabajo no te deja recuperar: alta. Mas descanso que
+ * trabajo si: baja.
+ *
+ * El cronometro se resuelve antes que el ratio: con trabajo = 0 la
+ * comparacion diria "descanso >= trabajo" y lo mandaria a baja, cuando en
+ * realidad no hay estructura de la cual deducir nada. Media es el default
+ * honesto para "no sabemos".
+ */
+export function intensidadDe(config: ConfigTemporizador): IntensidadSesion {
+  const c = normalizarConfig(config);
+  if (esCronometro(c)) return 'media';
+  if (c.descansoSeg < c.trabajoSeg) return 'alta';
+  if (c.descansoSeg === c.trabajoSeg) return 'media';
+  return 'baja';
+}
+
+export interface ProgresoSesion {
+  /** Bloques con al menos una pasada de trabajo terminada. */
+  bloquesCompletados: number;
+  /**
+   * TOTAL de pasadas de trabajo de la sesion entera, no las del ultimo
+   * bloque: 6 bloques de 8 completos dan 48.
+   */
+  pasadasCompletadas: number;
+}
+
+/**
+ * Cuanto se hizo de verdad, contando las fases de trabajo ya terminadas.
+ *
+ * Hoy la sesion solo se guarda cuando se completa, asi que esto siempre
+ * coincide con la config. Se calcula igual en vez de copiar la config: el dia
+ * que se guarde una sesion abandonada, el dato ya va a estar bien sin que
+ * nadie se acuerde de arreglarlo.
+ *
+ * Una fase abierta (el cronometro) cuenta como hecha apenas se la alcanza:
+ * no tiene final propio, asi que pararla ES terminarla.
+ */
+export function progresoEn(plan: Fase[], transcurrido: number): ProgresoSesion {
+  const t = Math.max(0, transcurrido);
+  const bloques = new Set<number>();
+  let pasadas = 0;
+
+  for (const f of plan) {
+    if (f.tipo !== 'trabajo') continue;
+    const hecha = f.hastaMs === null ? f.desdeMs <= t : f.hastaMs <= t;
+    if (!hecha) continue;
+    pasadas++;
+    bloques.add(f.bloque);
+  }
+
+  return { bloquesCompletados: bloques.size, pasadasCompletadas: pasadas };
+}
+
+// ---------------------------------------------------------------------------
+// Distancia y ritmo — solo del cronometro
+// ---------------------------------------------------------------------------
+
+/**
+ * Los km que escribio el usuario, o null si no escribio nada usable.
+ *
+ * La coma y el punto valen lo mismo: en Argentina se escribe "6,2" y ningun
+ * teclado decimal garantiza cual de los dos manda.
+ *
+ * El 0 y los negativos salen por null y no por excepcion. Es un campo
+ * opcional: "no hay distancia" y "escribio cualquier cosa" terminan en el
+ * mismo lugar, que es no mostrar ritmo y guardar NULL.
+ */
+export function parsearDistancia(texto: string): number | null {
+  const limpio = texto.trim().replace(',', '.');
+  // Number('') da 0, no NaN: sin este corte una cadena vacia pasaria el
+  // Number.isFinite y solo la atajaria el <= 0 de mas abajo, por accidente.
+  if (limpio === '') return null;
+
+  const n = Number(limpio);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+export interface Ritmo {
+  /** Minutos decimales por km. Para calcular, no para mostrar. */
+  minPorKm: number;
+  kmPorHora: number;
+  /** "7:15". Es el numero principal: es el que usa la gente que corre. */
+  ritmoTexto: string;
+  /** "8,3". Secundario. */
+  velocidadTexto: string;
+}
+
+/**
+ * Ritmo y velocidad, o null si no hay con que calcularlos.
+ *
+ * Devuelve null y NUNCA Infinity: dividir por una distancia en cero es
+ * exactamente el caso que produce un "Ritmo Infinity:NaN" en pantalla.
+ */
+export function calcularRitmo(distanciaKm: number | null, duracionSeg: number): Ritmo | null {
+  if (distanciaKm === null || !Number.isFinite(distanciaKm) || distanciaKm <= 0) return null;
+  if (!Number.isFinite(duracionSeg) || duracionSeg <= 0) return null;
+
+  const segPorKm = duracionSeg / distanciaKm;
+
+  // Se redondea el TOTAL de segundos por km y recien despues se parte en
+  // minutos y segundos. Al reves —redondear los segundos sueltos— 7 min y
+  // 59,6 s daria "7:60", que no es una hora.
+  const seg = Math.round(segPorKm);
+  const ritmoTexto = `${Math.floor(seg / 60)}:${String(seg % 60).padStart(2, '0')}`;
+
+  const kmPorHora = distanciaKm / (duracionSeg / 3600);
+
+  return {
+    minPorKm: segPorKm / 60,
+    kmPorHora,
+    ritmoTexto,
+    velocidadTexto: formatearDecimal(kmPorHora, 1),
+  };
+}
+
+/**
+ * Numero con coma decimal y sin ceros de relleno: 6.2 -> "6,2", 6 -> "6".
+ *
+ * A mano y no con toLocaleString('es-AR') para que las pruebas no dependan de
+ * que el node que las corre tenga el ICU completo.
+ */
+export function formatearDecimal(valor: number, decimales: number = 2): string {
+  if (!Number.isFinite(valor)) return '0';
+
+  const fijo = valor.toFixed(decimales);
+  const limpio = fijo.includes('.') ? fijo.replace(/\.?0+$/, '') : fijo;
+  return limpio.replace('.', ',');
+}

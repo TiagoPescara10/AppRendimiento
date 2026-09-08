@@ -46,7 +46,8 @@ const estilos = StyleSheet.create({
   flex: { flex: 1 },
   contenido: {
     flexGrow: 1,
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
     paddingBottom: spacing.xxxl,
     gap: spacing.md,
   },

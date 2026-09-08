@@ -1,7 +1,7 @@
 // app/(auth)/login.tsx
 import { useState, useRef } from 'react';
 import { useRouter } from 'expo-router';
-import { Alert, Text, Pressable, StyleSheet } from 'react-native';
+import { Alert, Text, StyleSheet } from 'react-native';
 import { Pantalla } from '@/ui/Pantalla';
 import { Input } from '@/ui/Input';
 import { Boton } from '@/ui/Boton';
@@ -67,10 +67,6 @@ export default function Login() {
       />
 
       <Boton titulo="Entrar" onPress={entrar} cargando={entrando} />
-
-      <Pressable onPress={() => router.replace('/registro')}>
-        <Text style={estilos.link}>¿No tenés cuenta? Registrate</Text>
-      </Pressable>
     </Pantalla>
   );
 }
@@ -81,11 +77,5 @@ const estilos = StyleSheet.create({
     lineHeight: lineHeight.title,
     fontWeight: 'bold',
     color: colors.textPrimary,
-  },
-  link: {
-    fontSize: fontSize.body,
-    lineHeight: lineHeight.body,
-    color: colors.action,
-    textAlign: 'center',
   },
 });

@@ -387,6 +387,8 @@ const estilos = StyleSheet.create({
   chipTexto: { fontSize: fontSize.small, color: colors.textSecondary },
   chipTextoActivo: { fontSize: fontSize.small, color: colors.textOnAction },
 
+  // Bloque de contenido, no un chip: lleva sombra. Sin ella el blanco quedaba
+  // flotando sobre el crema en vez de despegarse.
   switchFila: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -394,6 +396,7 @@ const estilos = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.surface,
     marginTop: spacing.sm,
+    ...shadow.card,
   },
   switchActivo: { backgroundColor: colors.accentSoft },
 

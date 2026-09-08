@@ -11,7 +11,9 @@ import { View, Text, StyleSheet } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { colors, fontSize, lineHeight, fontWeight } from '@/ui/theme';
 
-const TAMANO = 260;
+// Exportado para que quien lo escale (el preview del onboarding) no tenga que
+// repetir el numero y quede desincronizado si aca cambia.
+export const TAMANO = 260;
 const GROSOR = 12;
 
 // El radio es el de la LINEA MEDIA del trazo, no el del borde: SVG centra el

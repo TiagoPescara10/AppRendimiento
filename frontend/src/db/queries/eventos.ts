@@ -17,6 +17,16 @@ export interface NuevoEvento {
   duracion_estimada_min?: number | null;
   intensidad: Intensidad;
   completado?: boolean;
+  /**
+   * Si el evento nace ya contestado. Por defecto false, que es lo correcto
+   * para cualquier evento agendado a futuro.
+   *
+   * Lo pone en true el temporizador, que crea el evento retroactivo cuando la
+   * sesion se corrio sin nada agendado: un entrenamiento que el usuario acaba
+   * de hacer con el cronometro en la mano no necesita que despues le
+   * pregunten si lo hizo.
+   */
+  respondido?: boolean;
   notas?: string | null;
   /** La rutina que lo genero. null o ausente para un evento suelto. */
   rutina_id?: string | null;
@@ -27,8 +37,8 @@ export async function crearEvento(datos: NuevoEvento): Promise<EventoRow> {
   await getDb().runAsync(
     `INSERT INTO evento
        (id, usuario_id, tipo, fecha_hora_inicio, duracion_estimada_min,
-        intensidad, completado, notas, rutina_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        intensidad, completado, respondido, notas, rutina_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       datos.id,
       datos.usuario_id,
@@ -37,6 +47,7 @@ export async function crearEvento(datos: NuevoEvento): Promise<EventoRow> {
       datos.duracion_estimada_min ?? null,
       datos.intensidad,
       datos.completado ? 1 : 0,
+      datos.respondido ? 1 : 0,
       datos.notas ?? null,
       datos.rutina_id ?? null,
       t,

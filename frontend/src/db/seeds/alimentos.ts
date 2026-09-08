@@ -13,6 +13,7 @@ import { escribirMeta, leerMeta } from '../meta';
 import { randomUUID } from '../sync/uuid';
 import type { AlimentoSemilla } from './alimentos-ar';
 import { ALIMENTOS_AR } from './alimentos-ar';
+import { ALIMENTOS_AR_LOTE2 } from './alimentos-ar-lote2';
 
 const CLAVE_SEMILLA = 'semilla_alimentos';
 
@@ -26,7 +27,10 @@ interface LoteSemilla {
  * Para sumar alimentos mas adelante: lote nuevo con version 2, no editar el 1.
  * Los 318 de la v1 no se vuelven a intentar en las bases que ya los tienen.
  */
-const LOTES: LoteSemilla[] = [{ version: 1, alimentos: ALIMENTOS_AR }];
+const LOTES: LoteSemilla[] = [
+  { version: 1, alimentos: ALIMENTOS_AR },
+  { version: 2, alimentos: ALIMENTOS_AR_LOTE2 },
+];
 
 export const VERSION_SEMILLA: number = LOTES.reduce(
   (max, l) => (l.version > max ? l.version : max),

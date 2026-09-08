@@ -52,7 +52,15 @@ writeFileSync(
       rootDir: join(RAIZ, 'src'),
       types: [],
     },
-    include: [join(RAIZ, 'src/db/**/*.ts'), join(RAIZ, 'src/features/agenda/**/*.ts')],
+    include: [
+      join(RAIZ, 'src/db/**/*.ts'),
+      join(RAIZ, 'src/features/agenda/**/*.ts'),
+      // Archivo suelto y no el glob de features/entrenamiento/: sonidos.ts y
+      // los componentes de esa carpeta importan expo-audio y React, que no se
+      // pueden cargar en node. temporizador.ts entra igual, arrastrado por el
+      // import de guardarSesion.ts, y es puro.
+      join(RAIZ, 'src/features/entrenamiento/guardarSesion.ts'),
+    ],
   }),
 );
 
@@ -129,7 +137,12 @@ const qRutinas = req('./db/queries/rutinas.js');
 const qSueno = req('./db/queries/sueno.js');
 const qEnergia = req('./db/queries/energia.js');
 const semillas = req('./db/seeds/alimentos.js');
+const alimentosAr = req('./db/seeds/alimentos-ar.js');
+const alimentosLote2 = req('./db/seeds/alimentos-ar-lote2.js');
 const agenda = req('./features/agenda/materializar.js');
+const qSesiones = req('./db/queries/sesiones.js');
+const entrenamiento = req('./features/entrenamiento/guardarSesion.js');
+const T = req('./features/entrenamiento/temporizador.js');
 
 // El ciclo de imports se manifiesta aca: si schema -> migrations -> 00N -> schema,
 // el literal queda congelado en undefined al construirse el objeto.
@@ -152,7 +165,7 @@ await prueba('initDb() abre y migra una base en memoria', async () => {
   igual(v.user_version, migrations.VERSION_ESQUEMA, 'user_version');
 });
 
-await prueba('las 10 tablas existen', async () => {
+await prueba('las 11 tablas existen', async () => {
   const filas = await schema
     .getDb()
     .getAllAsync("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
@@ -160,6 +173,7 @@ await prueba('las 10 tablas existen', async () => {
   const esperadas = [
     'alimento', 'comida', 'evento', 'item_comida', 'meta',
     'perfil', 'registro_energia', 'registro_peso', 'registro_sueno', 'rutina',
+    'sesion_entrenamiento',
   ];
   igual(nombres.join(','), esperadas.join(','), 'tablas');
 });
@@ -169,7 +183,13 @@ await prueba('las 10 tablas existen', async () => {
 await prueba('la semilla cargo el catalogo entero', async () => {
   const r = await schema.getDb().getFirstAsync(
     "SELECT count(*) AS n FROM alimento WHERE fuente = 'manual' AND verificado = 1");
-  igual(r.n, 318, 'alimentos sembrados');
+  igual(r.n, 729, 'alimentos sembrados');
+});
+
+await prueba('el validador de coherencia no detecta errores en el catalogo unificado', async () => {
+  const todos = [...alimentosAr.ALIMENTOS_AR, ...alimentosLote2.ALIMENTOS_AR_LOTE2];
+  const incoherentes = alimentosLote2.alimentosIncoherentes(todos);
+  igual(incoherentes.length, 0, 'cero alimentos incoherentes');
 });
 
 await prueba('la semilla dejo su marca de version en meta', async () => {
@@ -684,6 +704,195 @@ await prueba('marcarCompletado() tambien deja el evento respondido', async () =>
   igual((await sinResponder(2)).includes('sr-viejo'), false, 'ya no aparece');
 });
 
+// --- sesiones de entrenamiento ----------------------------------------------
+//
+// Lo que queda guardado cuando el temporizador termina bien: siempre un evento
+// retroactivo mas su sesion. Antes habia una segunda rama, para cuando la
+// sesion salia de un evento ya agendado, pero al temporizador ya no se llega
+// desde la agenda y esa rama se fue con su prueba.
+//
+// Abandonar no llega hasta aca y por eso no se prueba: guardarSesionTerminada()
+// solo se llama al completar.
+
+// El plan de una sesion chica y completa, para no repetirlo en cada prueba.
+const CONFIG_PRUEBA = {
+  bloques: 2, pasadas: 3, trabajoSeg: 20, descansoSeg: 10, descansoBloqueSeg: 60,
+};
+const PLAN_PRUEBA = T.construirPlan(CONFIG_PRUEBA);
+const DURACION_PRUEBA_MS = T.duracionTotalMs(PLAN_PRUEBA);
+// 220 s: dos bloques de (3x20 + 2x10) = 80, mas un descanso de bloque de 60.
+
+await prueba('crea el evento retroactivo y le cuelga la sesion', async () => {
+  const inicio = new Date(2026, 8, 5, 7, 30, 0);
+
+  const r = await entrenamiento.guardarSesionTerminada({
+    usuarioId: 'u1',
+    config: CONFIG_PRUEBA,
+    plan: PLAN_PRUEBA,
+    inicio,
+    duracionRealMs: DURACION_PRUEBA_MS,
+  });
+
+  const e = await qEventos.obtenerEvento(r.eventoId);
+  igual(e === null, false, 'el evento existe');
+  igual(e.tipo, 'entrenamiento', 'tipo');
+  // Con offset local, no UTC: de aca sale la columna generada `fecha`.
+  igual(e.fecha_hora_inicio, '2026-09-05T07:30:00-03:00', 'arranca cuando arranco la sesion');
+  igual(e.fecha, '2026-09-05', 'la fecha generada es el dia local');
+  igual(e.completado, 1, 'completado');
+  // Lo importante: sin esto, el cartel de pendientes le preguntaria dos horas
+  // despues si hizo el entrenamiento que acaba de terminar.
+  igual(e.respondido, 1, 'respondido');
+  // 220 s -> 4 min. La intensidad sale del ratio 20/10: descanso < trabajo.
+  igual(e.duracion_estimada_min, 4, 'duracion redondeada a minutos');
+  igual(e.intensidad, 'alta', 'intensidad deducida del ratio');
+
+  // Las columnas de la sesion. Vivian en la prueba de la rama agendada, que se
+  // fue con la rama; son lo unico que mira que la config se guarde entera, asi
+  // que se mudaron aca en vez de borrarse.
+  const ses = await qSesiones.obtenerSesionPorEvento(r.eventoId);
+  igual(ses === null, false, 'la sesion existe');
+  igual(ses.id, r.sesion.id, 'la sesion es la que devolvio');
+  igual(ses.bloques, 2, 'config: bloques');
+  igual(ses.pasadas, 3, 'config: pasadas');
+  igual(ses.trabajo_seg, 20, 'config: trabajo');
+  igual(ses.descanso_seg, 10, 'config: descanso');
+  igual(ses.descanso_bloque_seg, 60, 'config: descanso de bloque');
+  igual(ses.bloques_completados, 2, 'bloques completados');
+  // TOTAL de la sesion, no del ultimo bloque: 2 x 3 = 6.
+  igual(ses.pasadas_completadas, 6, 'pasadas completadas (total)');
+  igual(ses.duracion_real_seg, 220, 'duracion real en segundos');
+  igual(ses.distancia_km, null, 'sin distancia al crearse');
+});
+
+await prueba('un evento retroactivo no aparece en el cartel de pendientes', async () => {
+  // Es la consecuencia practica de respondido = 1, y vale la pena verla:
+  // una sesion de hace horas no tiene que generar una pregunta.
+  const inicio = new Date(2026, 8, 5, 7, 30, 0);
+  const r = await entrenamiento.guardarSesionTerminada({
+    usuarioId: 'u1', config: CONFIG_PRUEBA, plan: PLAN_PRUEBA,
+    inicio, duracionRealMs: DURACION_PRUEBA_MS,
+  });
+
+  const pendientes = await qEventos.listarEventosSinResponder(
+    'u1', 2, new Date(2026, 8, 5, 20, 0, 0),
+  );
+  igual(pendientes.some((e) => e.id === r.eventoId), false, 'no lo pregunta');
+});
+
+await prueba('el cronometro guarda 1 bloque, 1 pasada y su duracion real', async () => {
+  const plan = T.construirPlan(T.CONFIG_CRONOMETRO);
+  const r = await entrenamiento.guardarSesionTerminada({
+    usuarioId: 'u1',
+    config: T.CONFIG_CRONOMETRO, plan,
+    inicio: new Date(2026, 8, 6, 9, 0, 0),
+    duracionRealMs: 2700000,   // 45 min
+  });
+
+  const ses = await qSesiones.obtenerSesionPorEvento(r.eventoId);
+  igual(ses.trabajo_seg, 0, 'trabajo 0 es lo que define al cronometro');
+  // La fase abierta cuenta como hecha: pararla ES terminarla.
+  igual(ses.bloques_completados, 1, 'un bloque');
+  igual(ses.pasadas_completadas, 1, 'una pasada');
+  igual(ses.duracion_real_seg, 2700, '45 min en segundos');
+
+  const e = await qEventos.obtenerEvento(r.eventoId);
+  igual(e.duracion_estimada_min, 45, 'el evento dice 45 min');
+  igual(e.intensidad, 'media', 'el cronometro es media, no baja');
+});
+
+await prueba('la distancia se carga despues y solo acepta valores utiles', async () => {
+  const plan = T.construirPlan(T.CONFIG_CRONOMETRO);
+  const r = await entrenamiento.guardarSesionTerminada({
+    usuarioId: 'u1',
+    config: T.CONFIG_CRONOMETRO, plan,
+    inicio: new Date(2026, 8, 6, 10, 0, 0),
+    duracionRealMs: 2700000,
+  });
+  igual(r.sesion.distancia_km, null, 'nace sin distancia');
+
+  await qSesiones.actualizarDistancia(r.sesion.id, 6.2);
+  igual((await qSesiones.obtenerSesion(r.sesion.id)).distancia_km, 6.2, 'cargada');
+
+  // null la borra: es el unico valor que significa "sin distancia".
+  await qSesiones.actualizarDistancia(r.sesion.id, null);
+  igual((await qSesiones.obtenerSesion(r.sesion.id)).distancia_km, null, 'borrada');
+
+  // El CHECK del DDL rechaza el 0, para que no haya dos formas de decir lo
+  // mismo. parsearDistancia() ya lo convierte en null antes de llegar aca;
+  // esto verifica que la base no dependa de eso.
+  await lanza(
+    () => qSesiones.actualizarDistancia(r.sesion.id, 0),
+    /CHECK|constraint/i,
+    'distancia 0',
+  );
+  await lanza(
+    () => qSesiones.actualizarDistancia(r.sesion.id, -3),
+    /CHECK|constraint/i,
+    'distancia negativa',
+  );
+});
+
+// Un evento con sesion para las dos pruebas que siguen. Antes lo dejaba parada
+// la prueba de la rama agendada; ahora sale del unico camino que crea sesiones.
+// Las dos prueban constraints del DDL, no el temporizador, asi que siguen
+// valiendo aunque la rama que las alimentaba ya no exista.
+const conSesion = await entrenamiento.guardarSesionTerminada({
+  usuarioId: 'u1', config: CONFIG_PRUEBA, plan: PLAN_PRUEBA,
+  inicio: new Date(2026, 8, 7, 19, 0, 0), duracionRealMs: DURACION_PRUEBA_MS,
+});
+
+await prueba('un evento no puede tener dos sesiones', async () => {
+  // El UNIQUE es la promesa que hace obtenerSesionPorEvento() al devolver una
+  // fila y no un array.
+  await lanza(
+    () => qSesiones.crearSesion({
+      id: 'ses-duplicada', evento_id: conSesion.eventoId,
+      bloques: 1, pasadas: 1, trabajo_seg: 20, descanso_seg: 0, descanso_bloque_seg: 0,
+      bloques_completados: 1, pasadas_completadas: 1, duracion_real_seg: 20,
+    }),
+    /UNIQUE|constraint/i,
+    'segunda sesion del mismo evento',
+  );
+});
+
+await prueba('borrar el evento se lleva su sesion (CASCADE)', async () => {
+  const ses = await qSesiones.obtenerSesionPorEvento(conSesion.eventoId);
+  igual(ses === null, false, 'estaba');
+
+  await qEventos.eliminarEvento(conSesion.eventoId);
+
+  // Sola, sin el evento, la sesion no significa nada: no queda huerfana.
+  igual(await qSesiones.obtenerSesion(ses.id), null, 'la sesion se fue con el evento');
+  igual(await qSesiones.obtenerSesionPorEvento(conSesion.eventoId), null, 'no queda nada colgado');
+});
+
+await prueba('obtenerSesionPorEvento() da null si el evento no se corrio', async () => {
+  await qEventos.crearEvento({
+    id: 'ev-sin-sesion', usuario_id: 'u1', tipo: 'partido',
+    fecha_hora_inicio: '2026-10-01T16:00:00-03:00', intensidad: 'alta',
+  });
+  igual(await qSesiones.obtenerSesionPorEvento('ev-sin-sesion'), null, 'sin sesion');
+  igual(await qSesiones.obtenerSesionPorEvento('no-existe'), null, 'evento inexistente');
+});
+
+await prueba('crearEvento() deja respondido en 0 salvo que se lo pidan', async () => {
+  await qEventos.crearEvento({
+    id: 'ev-mudo', usuario_id: 'u1', tipo: 'gimnasio',
+    fecha_hora_inicio: '2026-10-02T09:00:00-03:00', intensidad: 'media',
+  });
+  igual((await qEventos.obtenerEvento('ev-mudo')).respondido, 0, 'por defecto sin responder');
+
+  await qEventos.crearEvento({
+    id: 'ev-nace-respondido', usuario_id: 'u1', tipo: 'gimnasio',
+    fecha_hora_inicio: '2026-10-02T10:00:00-03:00', intensidad: 'media',
+    completado: true, respondido: true,
+  });
+  const e = await qEventos.obtenerEvento('ev-nace-respondido');
+  igual(e.respondido, 1, 'respondido');
+  igual(e.completado, 1, 'completado');
+});
+
 await prueba('borrar el perfil arrastra todo lo suyo (CASCADE)', async () => {
   await qPerfil.eliminarPerfil('u1');
   for (const t of ['comida', 'registro_sueno', 'registro_energia', 'registro_peso', 'evento', 'rutina']) {
@@ -708,7 +917,7 @@ const archivo = join(tmp, 'dos-arranques.db');
 await prueba('primer arranque sobre archivo: siembra', async () => {
   await schema.initDb(archivo);
   const r = await schema.getDb().getFirstAsync('SELECT count(*) AS n FROM alimento');
-  igual(r.n, 318, 'alimentos tras instalar');
+  igual(r.n, 729, 'alimentos tras instalar');
   await schema.cerrarDb();
 });
 
@@ -716,9 +925,42 @@ await prueba('segundo arranque: sale por el marcador, sin tocar el catalogo', as
   const db = await schema.initDb(archivo);
   igual(await semillas.sembrarAlimentos(db), 0, 'filas insertadas');
   const r = await schema.getDb().getFirstAsync('SELECT count(*) AS n FROM alimento');
-  igual(r.n, 318, 'alimentos tras reabrir');
+  igual(r.n, 729, 'alimentos tras reabrir');
   const v = await schema.getDb().getFirstAsync('PRAGMA user_version');
   igual(v.user_version, migrations.VERSION_ESQUEMA, 'user_version');
+  await schema.cerrarDb();
+});
+
+// --- migracion de semilla v1 a v2 -------------------------------------------
+//
+// Simula una base existente con la v1 ya sembrada (318 alimentos y meta=1).
+// Al correr sembrarAlimentos(), debe insertar exactamente los 411 del lote 2
+// y actualizar la marca a 2 sin duplicar los 318 existentes.
+await prueba('el lote 2 se siembra sobre una base que ya tiene el lote 1', async () => {
+  const archivoV1 = join(tmp, 'base-v1.db');
+  const db = await schema.initDb(archivoV1);
+
+  // Simular que solo estaba el lote 1 (318 filas) y la marca '1'
+  await db.runAsync(
+    "DELETE FROM alimento WHERE id NOT IN (SELECT id FROM alimento ORDER BY rowid LIMIT 318)");
+  await meta.escribirMeta(db, 'semilla_alimentos', '1');
+  const antes = await db.getFirstAsync('SELECT count(*) AS n FROM alimento');
+  igual(antes.n, 318, 'base en v1 con 318 alimentos');
+
+  // Ahora corremos sembrarAlimentos(), que debe aplicar solo el lote 2
+  const insertadas = await semillas.sembrarAlimentos(db);
+  igual(insertadas, 411, 'filas nuevas del lote 2 insertadas');
+
+  const despues = await db.getFirstAsync('SELECT count(*) AS n FROM alimento');
+  igual(despues.n, 729, 'catalogo total tras sumar lote 2');
+
+  const v = await meta.leerMeta(db, 'semilla_alimentos');
+  igual(v, '2', 'marca actualizada a version 2');
+
+  // Segunda corrida: no debe insertar nada
+  const reintento = await semillas.sembrarAlimentos(db);
+  igual(reintento, 0, 'cero filas en segunda corrida');
+
   await schema.cerrarDb();
 });
 
@@ -772,9 +1014,62 @@ await prueba('la 004 sobre una base v3 con eventos: la migra sin perder nada', a
   // El futuro queda mudo a proposito: ese si hay que preguntarlo cuando pase.
   igual(por['agendado-a-futuro'].respondido, 0, 'el futuro sigue sin responder');
 
-  // La tabla nueva llego por el camino de ALTER/CREATE, no por un CREATE limpio.
+  // Las tablas nuevas llegaron por el camino de ALTER/CREATE, no por un CREATE
+  // limpio: esta base ya existia antes de la 004 y de la 005.
   const r = await db.getFirstAsync("SELECT count(*) AS n FROM sqlite_master WHERE name = 'rutina'");
   igual(r.n, 1, 'la tabla rutina existe tras actualizar');
+  const r5 = await db.getFirstAsync(
+    "SELECT count(*) AS n FROM sqlite_master WHERE name = 'sesion_entrenamiento'");
+  igual(r5.n, 1, 'la tabla sesion_entrenamiento existe tras actualizar');
+
+  await db.closeAsync();
+});
+
+// La 005 sola, sobre una base que ya venia en v4. Es el salto que va a hacer
+// cualquiera que tenga la app instalada de antes: la 005 solo CREA una tabla,
+// asi que lo unico que hay que demostrar es que no toca el historial y que la
+// tabla nueva queda usable contra un evento que ya existia.
+await prueba('la 005 sobre una base v4 con historial: agrega la tabla y no toca nada', async () => {
+  const db = await sqlite.openDatabaseAsync(join(tmp, 'v4-con-datos.db'));
+  await db.execAsync('PRAGMA foreign_keys = ON;');
+  for (const m of migrations.migraciones.filter((x) => x.version <= 4)) {
+    await db.execAsync(m.sql);
+  }
+  await db.execAsync('PRAGMA user_version = 4');
+
+  const t = '2020-01-01T00:00:00-03:00';
+  await db.runAsync(
+    'INSERT INTO perfil (id, fecha_alta, created_at, updated_at) VALUES (?, ?, ?, ?)',
+    ['v4', t, t, t],
+  );
+  await db.runAsync(
+    `INSERT INTO evento (id, usuario_id, tipo, fecha_hora_inicio, intensidad, completado, created_at, updated_at)
+     VALUES ('ev-v4', 'v4', 'entrenamiento', '2025-05-01T18:00:00-03:00', 'media', 1, ?, ?)`,
+    [t, t],
+  );
+
+  igual(await migrations.migrar(db), migrations.VERSION_ESQUEMA, 'version tras migrar');
+
+  const e = await db.getFirstAsync("SELECT * FROM evento WHERE id = 'ev-v4'");
+  igual(e === null, false, 'el evento viejo sigue ahi');
+  igual(e.completado, 1, 'y conserva su completado');
+
+  // La tabla nueva arranca vacia: las sesiones anteriores a la 005 no existen
+  // y no hay nada que inventarles.
+  const n = await db.getFirstAsync('SELECT count(*) AS n FROM sesion_entrenamiento');
+  igual(n.n, 0, 'sin sesiones inventadas');
+
+  // Y es usable contra un evento que ya venia de antes.
+  await db.runAsync(
+    `INSERT INTO sesion_entrenamiento
+       (id, evento_id, bloques, pasadas, trabajo_seg, descanso_seg, descanso_bloque_seg,
+        bloques_completados, pasadas_completadas, duracion_real_seg, created_at, updated_at)
+     VALUES ('ses-v4', 'ev-v4', 1, 8, 20, 10, 0, 1, 8, 240, ?, ?)`,
+    [t, t],
+  );
+  const ses = await db.getFirstAsync("SELECT * FROM sesion_entrenamiento WHERE id = 'ses-v4'");
+  igual(ses.pasadas_completadas, 8, 'la sesion se escribio');
+  igual(ses.distancia_km, null, 'la distancia es opcional');
 
   await db.closeAsync();
 });

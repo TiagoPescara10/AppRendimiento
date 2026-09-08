@@ -386,6 +386,154 @@ prueba('el resumen se adapta a la escala', () => {
   igual(T.resumenPlan(T.CONFIG_CRONOMETRO), 'Sin límite, hasta que lo pares', 'cronometro');
 });
 
+// --- intensidad ------------------------------------------------------------
+
+console.log('\nla intensidad deducida:');
+
+prueba('sale del ratio trabajo/descanso', () => {
+  // Menos descanso que trabajo no te deja recuperar.
+  igual(T.intensidadDe(config({ trabajoSeg: 40, descansoSeg: 20 })), 'alta', 'descanso < trabajo');
+  igual(T.intensidadDe(config({ trabajoSeg: 30, descansoSeg: 30 })), 'media', 'descanso = trabajo');
+  igual(T.intensidadDe(config({ trabajoSeg: 20, descansoSeg: 60 })), 'baja', 'descanso > trabajo');
+});
+
+prueba('el cronometro es media y no baja', () => {
+  // Sin el corte por esCronometro, trabajo = 0 haria "descanso >= trabajo" y
+  // caeria en baja. No hay estructura de la cual deducir nada: media.
+  igual(T.intensidadDe(T.CONFIG_CRONOMETRO), 'media', 'cronometro puro');
+  igual(
+    T.intensidadDe(config({ trabajoSeg: 0, descansoSeg: 30 })),
+    'media',
+    'cronometro con descanso cargado igual da media',
+  );
+});
+
+prueba('los presets dan lo que se espera', () => {
+  const de = (id) => T.intensidadDe(T.PRESETS.find((p) => p.id === id).config);
+  igual(de('tabata'), 'alta', 'tabata: 20 de trabajo y 10 de descanso');
+  igual(de('pasadas'), 'media', 'pasadas: 20 y 20');
+  igual(de('series'), 'baja', 'series: 45 y 90');
+  igual(de('cronometro'), 'media', 'cronometro');
+});
+
+// --- progreso --------------------------------------------------------------
+
+console.log('\nlo que se completo:');
+
+prueba('un plan corrido entero cuenta todas sus pasadas', () => {
+  // 2 bloques x 3 pasadas de 20 s, descansos de 10, descanso de bloque de 60.
+  const c = config({ bloques: 2, pasadas: 3, trabajoSeg: 20, descansoSeg: 10, descansoBloqueSeg: 60 });
+  const plan = T.construirPlan(c);
+  const total = T.duracionTotalMs(plan);
+
+  const p = T.progresoEn(plan, total);
+  igual(p.bloquesCompletados, 2, 'bloques');
+  // TOTAL de la sesion, no del ultimo bloque: 2 x 3 = 6, no 3.
+  igual(p.pasadasCompletadas, 6, 'pasadas totales');
+});
+
+prueba('a mitad de camino cuenta solo lo terminado', () => {
+  const c = config({ bloques: 2, pasadas: 3, trabajoSeg: 20, descansoSeg: 10, descansoBloqueSeg: 60 });
+  const plan = T.construirPlan(c);
+
+  igual(T.progresoEn(plan, 0), { bloquesCompletados: 0, pasadasCompletadas: 0 }, 'sin empezar');
+
+  // El primer trabajo termina a los 20 s justos.
+  igual(T.progresoEn(plan, 19999).pasadasCompletadas, 0, 'un ms antes no cuenta');
+  igual(T.progresoEn(plan, 20000).pasadasCompletadas, 1, 'al cerrar si');
+
+  // Bloque 1 completo: 3x20 + 2x10 = 80 s. Mas el descanso de bloque, 140 s.
+  const b1 = T.progresoEn(plan, 80000);
+  igual(b1.bloquesCompletados, 1, 'un bloque cerrado');
+  igual(b1.pasadasCompletadas, 3, 'tres pasadas');
+
+  // Primera pasada del bloque 2: 140 + 20 = 160 s.
+  const b2 = T.progresoEn(plan, 160000);
+  igual(b2.bloquesCompletados, 2, 'el segundo bloque ya cuenta con una pasada');
+  igual(b2.pasadasCompletadas, 4, 'cuatro pasadas en total');
+});
+
+prueba('el cronometro cuenta su fase abierta como hecha', () => {
+  // No tiene final propio: pararlo ES terminarlo. Si se exigiera hastaMs, una
+  // sesion de cronometro se guardaria siempre con 0 pasadas.
+  const plan = T.construirPlan(T.CONFIG_CRONOMETRO);
+  igual(T.progresoEn(plan, 600000), { bloquesCompletados: 1, pasadasCompletadas: 1 }, '10 min');
+  igual(T.progresoEn(plan, 0), { bloquesCompletados: 1, pasadasCompletadas: 1 }, 'parado al toque');
+});
+
+prueba('los descansos no cuentan como pasadas', () => {
+  const c = config({ pasadas: 2, trabajoSeg: 20, descansoSeg: 3600 });
+  const plan = T.construirPlan(c);
+  // A los 30 s: primer trabajo cerrado y adentro del descanso largo.
+  igual(T.progresoEn(plan, 30000).pasadasCompletadas, 1, 'solo el trabajo');
+});
+
+// --- distancia -------------------------------------------------------------
+
+console.log('\nla distancia escrita a mano:');
+
+prueba('la coma y el punto valen lo mismo', () => {
+  igual(T.parsearDistancia('6,2'), 6.2, 'con coma');
+  igual(T.parsearDistancia('6.2'), 6.2, 'con punto');
+  igual(T.parsearDistancia('  6,2  '), 6.2, 'con espacios alrededor');
+  igual(T.parsearDistancia('10'), 10, 'entero');
+  igual(T.parsearDistancia('0,5'), 0.5, 'menos de un km');
+});
+
+prueba('lo que no sirve sale por null y no por excepcion', () => {
+  igual(T.parsearDistancia(''), null, 'vacio');
+  igual(T.parsearDistancia('   '), null, 'solo espacios');
+  igual(T.parsearDistancia('abc'), null, 'texto');
+  igual(T.parsearDistancia('0'), null, 'cero');
+  igual(T.parsearDistancia('0,0'), null, 'cero con decimales');
+  igual(T.parsearDistancia('-3'), null, 'negativo');
+  igual(T.parsearDistancia('1,2,3'), null, 'dos separadores');
+});
+
+// --- ritmo -----------------------------------------------------------------
+
+console.log('\nel ritmo:');
+
+prueba('min/km es el numero principal', () => {
+  // 6,2 km en 45 min = 2700 s. 2700 / 6,2 = 435,48 s/km -> 7:15.
+  const r = T.calcularRitmo(6.2, 2700);
+  igual(r.ritmoTexto, '7:15', 'ritmo');
+  igual(r.velocidadTexto, '8,3', 'velocidad');
+});
+
+prueba('el redondeo no puede producir un :60', () => {
+  // 7 min 59,6 s por km. Redondear los segundos sueltos daria "7:60".
+  const r = T.calcularRitmo(1, 479.6);
+  igual(r.ritmoTexto, '8:00', 'rueda al minuto siguiente');
+});
+
+prueba('ritmos redondos y de mas de una hora por km', () => {
+  igual(T.calcularRitmo(10, 3000).ritmoTexto, '5:00', '10 km en 50 min');
+  igual(T.calcularRitmo(1, 60).ritmoTexto, '1:00', 'un km en un minuto');
+  // No se corta en 59: un ritmo de caminata muy lenta sigue siendo legible.
+  igual(T.calcularRitmo(1, 3900).ritmoTexto, '65:00', 'mas de una hora por km');
+});
+
+prueba('sin datos utiles devuelve null, nunca Infinity', () => {
+  igual(T.calcularRitmo(null, 2700), null, 'sin distancia');
+  igual(T.calcularRitmo(0, 2700), null, 'distancia cero');
+  igual(T.calcularRitmo(-5, 2700), null, 'distancia negativa');
+  igual(T.calcularRitmo(Infinity, 2700), null, 'distancia infinita');
+  igual(T.calcularRitmo(NaN, 2700), null, 'distancia NaN');
+  igual(T.calcularRitmo(6.2, 0), null, 'duracion cero');
+  igual(T.calcularRitmo(6.2, -10), null, 'duracion negativa');
+});
+
+prueba('el formato decimal usa coma y no deja ceros de relleno', () => {
+  igual(T.formatearDecimal(6.2), '6,2', 'un decimal');
+  igual(T.formatearDecimal(6), '6', 'entero sin ",00"');
+  igual(T.formatearDecimal(6.25), '6,25', 'dos decimales');
+  igual(T.formatearDecimal(6.254), '6,25', 'redondea al segundo');
+  igual(T.formatearDecimal(8.266, 1), '8,3', 'un decimal pedido');
+  igual(T.formatearDecimal(10, 1), '10', 'entero con un decimal pedido');
+  igual(T.formatearDecimal(0.5), '0,5', 'menos de uno');
+});
+
 // --- salida ----------------------------------------------------------------
 
 rmSync(tmp, { recursive: true, force: true });

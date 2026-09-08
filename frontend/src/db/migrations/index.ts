@@ -14,6 +14,7 @@ import { migracion001 } from './001_inicial';
 import { migracion002 } from './002_alimento_porciones';
 import { migracion003 } from './003_meta';
 import { migracion004 } from './004_rutinas';
+import { migracion005 } from './005_sesiones';
 
 export interface Migracion {
   /** Entero creciente, sin huecos. Termina en PRAGMA user_version. */
@@ -28,6 +29,7 @@ export const migraciones: Migracion[] = [
   migracion002,
   migracion003,
   migracion004,
+  migracion005,
 ];
 
 /** Version del esquema que espera este build. */

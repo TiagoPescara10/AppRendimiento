@@ -67,9 +67,9 @@ export default function Resumen() {
       totalPasos={5}
       titulo={perfil?.nombre ? `Listo, ${perfil.nombre}` : 'Listo'}
       subtitulo="Esto es lo que calculamos para vos"
-      onSiguiente={() => router.push('/registro')}
+      onSiguiente={() => router.push('/onboarding/beneficios')}
       puedeSeguir={!cargando && !!resultado}
-      textoBoton="Crear cuenta"
+      textoBoton="Ver qué hace la app"
     >
       {resultado ? (
         <>
@@ -101,12 +101,6 @@ export default function Resumen() {
             <Fila label="Actividad" valor={actividad} />
             <Fila label="Objetivo" valor={objetivo} ultima />
           </Card>
-
-          <Card>
-            <Text style={estilos.muroTitulo}>Creá tu cuenta para seguir</Text>
-            <Text style={estilos.muroTexto}>Registrá tus comidas y mirá cómo evoluciona tu peso</Text>
-            <Text style={estilos.muroTexto}>Recibí sugerencias antes de cada partido o entrenamiento</Text>
-          </Card>
         </>
       ) : (
         <Card>
@@ -130,7 +124,10 @@ function Fila({ label, valor, ultima }: { label: string; valor: string; ultima?:
 
 const estilos = StyleSheet.create({
   destacado: {
-    backgroundColor: colors.surfaceAlt,
+    // Blanco, no surfaceAlt: es el gemelo del destacado del dashboard y el
+    // esquema dice que el contenido va en blanco. En crema sobre crema casi no
+    // se despegaba del lienzo.
+    backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: spacing.lg,
     alignItems: 'center',
@@ -153,7 +150,7 @@ const estilos = StyleSheet.create({
   },
   macro: {
     flex: 1,
-    backgroundColor: colors.surfaceAlt,
+    backgroundColor: colors.surface,
     borderRadius: radius.md,
     padding: spacing.md,
     alignItems: 'center',
@@ -197,13 +194,6 @@ const estilos = StyleSheet.create({
     fontSize: fontSize.body,
     lineHeight: lineHeight.body,
     color: colors.textPrimary,
-  },
-  muroTitulo: {
-    fontSize: fontSize.body,
-    lineHeight: lineHeight.body,
-    fontWeight: '500',
-    color: colors.textPrimary,
-    marginBottom: spacing.sm,
   },
   muroTexto: {
     fontSize: fontSize.small,

@@ -19,7 +19,7 @@ import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Pantalla } from '@/ui/Pantalla';
 import { SheetPorciones } from '@/features/comidas/components/SheetPorciones';
 import type { DatosSheet } from '@/features/comidas/components/SheetPorciones';
-import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow, fontWeight } from '@/ui/theme';
 
 import {
   obtenerComida,
@@ -36,8 +36,41 @@ function capitalizar(texto: string): string {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
 
-function kcalDeItem(item: ItemComidaConAlimento): number {
-  return Math.round((item.kcal_por_100g * item.cantidad_g) / 100);
+/**
+ * Desglose de macronutrientes con palabras completas y punto de color.
+ * Redondea al mostrar para mantener la precision del calculo previo.
+ */
+function DesgloseMacros({
+  proteina,
+  carbohidratos,
+  grasa,
+}: {
+  proteina: number;
+  carbohidratos: number;
+  grasa: number;
+}) {
+  return (
+    <View style={estilos.macrosFila}>
+      <View style={estilos.macroItem}>
+        <View style={[estilos.puntoMacro, estilos.puntoProteina]} />
+        <Text style={estilos.macroTexto}>
+          Proteínas <Text style={estilos.macroValor}>{Math.round(proteina)} g</Text>
+        </Text>
+      </View>
+      <View style={estilos.macroItem}>
+        <View style={[estilos.puntoMacro, estilos.puntoCarbos]} />
+        <Text style={estilos.macroTexto}>
+          Carbohidratos <Text style={estilos.macroValor}>{Math.round(carbohidratos)} g</Text>
+        </Text>
+      </View>
+      <View style={estilos.macroItem}>
+        <View style={[estilos.puntoMacro, estilos.puntoGrasa]} />
+        <Text style={estilos.macroTexto}>
+          Grasas <Text style={estilos.macroValor}>{Math.round(grasa)} g</Text>
+        </Text>
+      </View>
+    </View>
+  );
 }
 
 /**
@@ -164,19 +197,6 @@ export default function DetalleComida() {
     ]);
   };
 
-  const totales = items.reduce(
-    (acc, it) => {
-      const f = it.cantidad_g / 100;
-      return {
-        kcal: acc.kcal + it.kcal_por_100g * f,
-        prot: acc.prot + it.proteina_g * f,
-        carb: acc.carb + it.carbohidratos_g * f,
-        grasa: acc.grasa + it.grasa_g * f,
-      };
-    },
-    { kcal: 0, prot: 0, carb: 0, grasa: 0 },
-  );
-
   const datosSheet: DatosSheet | null = editando && {
     nombre: editando.alimento_nombre,
     kcal_por_100g: editando.kcal_por_100g,
@@ -221,34 +241,42 @@ export default function DetalleComida() {
         </View>
       ) : (
         <View style={estilos.lista}>
-          {items.map((item) => (
-            <Pressable key={item.id} style={estilos.item} onPress={() => setEditando(item)}>
-              <View style={estilos.flex}>
-                <Text style={estilos.nombre}>{item.alimento_nombre}</Text>
-                <Text style={estilos.porcion}>
-                  {etiquetaCantidad(item.porciones, item.cantidad_g)}
-                </Text>
-              </View>
-              <View style={estilos.derecha}>
-                <Text style={estilos.nombre}>{kcalDeItem(item)}</Text>
-                <Text style={estilos.unidad}>kcal</Text>
-              </View>
-            </Pressable>
-          ))}
-        </View>
-      )}
+          {items.map((item) => {
+            const f = item.cantidad_g / 100;
+            const kcal = item.kcal_por_100g * f;
+            const prot = item.proteina_g * f;
+            const carb = item.carbohidratos_g * f;
+            const grasa = item.grasa_g * f;
 
-      {items.length > 0 && (
-        <View style={estilos.pie}>
-          <View style={estilos.totalFila}>
-            <Text style={estilos.nombre}>Total</Text>
-            <Text style={estilos.total}>{Math.round(totales.kcal)} kcal</Text>
-          </View>
-          <View style={estilos.macros}>
-            <Text style={estilos.detalle}>P {Math.round(totales.prot)} g</Text>
-            <Text style={estilos.detalle}>C {Math.round(totales.carb)} g</Text>
-            <Text style={estilos.detalle}>G {Math.round(totales.grasa)} g</Text>
-          </View>
+            return (
+              <Pressable
+                key={item.id}
+                style={({ pressed }) => [
+                  estilos.card,
+                  pressed && estilos.cardPresionada,
+                ]}
+                onPress={() => setEditando(item)}
+              >
+                <View>
+                  <Text style={estilos.alimentoNombre}>{item.alimento_nombre}</Text>
+                  <Text style={estilos.alimentoPorcion}>
+                    {etiquetaCantidad(item.porciones, item.cantidad_g)}
+                  </Text>
+                </View>
+
+                <View style={estilos.caloriasFila}>
+                  <Text style={estilos.caloriasValor}>{Math.round(kcal)}</Text>
+                  <Text style={estilos.caloriasUnidad}> kcal</Text>
+                </View>
+
+                <DesgloseMacros
+                  proteina={prot}
+                  carbohidratos={carb}
+                  grasa={grasa}
+                />
+              </Pressable>
+            );
+          })}
         </View>
       )}
 
@@ -274,37 +302,84 @@ const estilos = StyleSheet.create({
   titulo: {
     fontSize: fontSize.body,
     lineHeight: lineHeight.body,
-    fontWeight: '500',
+    fontWeight: fontWeight.medium,
     color: colors.textPrimary,
   },
 
   vacio: { paddingVertical: spacing.xl, alignItems: 'center' },
+  detalle: { fontSize: fontSize.small, lineHeight: lineHeight.small, color: colors.textSecondary },
 
-  lista: { gap: spacing.xs },
-  item: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
+  lista: { gap: spacing.sm },
+
+  // Card de cada alimento
+  card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    gap: spacing.sm,
     ...shadow.card,
   },
-  derecha: { alignItems: 'flex-end' },
-  unidad: { fontSize: fontSize.small, color: colors.textSecondary },
+  cardPresionada: { opacity: 0.7 },
 
-  nombre: { fontSize: fontSize.body, lineHeight: lineHeight.body, color: colors.textPrimary },
-  detalle: { fontSize: fontSize.small, lineHeight: lineHeight.small, color: colors.textSecondary },
-  porcion: { fontSize: fontSize.small, color: colors.action, marginTop: 2 },
-
-  pie: {
-    borderTopWidth: 0.5,
-    borderTopColor: colors.border,
-    paddingTop: spacing.md,
-    gap: spacing.sm,
+  alimentoNombre: {
+    fontSize: fontSize.body,
+    lineHeight: lineHeight.body,
+    fontWeight: fontWeight.medium,
+    color: colors.textPrimary,
   },
-  totalFila: { flexDirection: 'row', justifyContent: 'space-between' },
-  total: { fontSize: fontSize.body, fontWeight: '500', color: colors.textPrimary },
-  macros: { flexDirection: 'row', gap: spacing.md },
+  alimentoPorcion: {
+    fontSize: fontSize.small,
+    lineHeight: lineHeight.small,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+
+  caloriasFila: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
+  caloriasValor: {
+    fontSize: fontSize.title,
+    lineHeight: lineHeight.title,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  caloriasUnidad: {
+    fontSize: fontSize.small,
+    lineHeight: lineHeight.small,
+    color: colors.textSecondary,
+    marginLeft: spacing.xs,
+  },
+
+  // Desglose de macros con puntos de color
+  macrosFila: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    columnGap: spacing.md,
+    rowGap: spacing.xs,
+  },
+  macroItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  puntoMacro: {
+    width: 6,
+    height: 6,
+    borderRadius: radius.pill,
+  },
+  puntoProteina: { backgroundColor: colors.protein },
+  puntoCarbos: { backgroundColor: colors.carbs },
+  puntoGrasa: { backgroundColor: colors.fat },
+  macroTexto: {
+    fontSize: fontSize.small,
+    lineHeight: lineHeight.small,
+    color: colors.textSecondary,
+  },
+  macroValor: {
+    fontWeight: fontWeight.medium,
+    color: colors.textPrimary,
+  },
 
   borrar: { paddingVertical: spacing.md, alignItems: 'center' },
   borrarTexto: { fontSize: fontSize.body, color: colors.danger },

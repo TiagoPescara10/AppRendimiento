@@ -11,7 +11,7 @@ import { Input } from '@/ui/Input';
 import { Boton } from '@/ui/Boton';
 import { SheetPorciones } from '@/features/comidas/components/SheetPorciones';
 import type { DatosSheet } from '@/features/comidas/components/SheetPorciones';
-import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, fontWeight, lineHeight, shadow, sizes } from '@/ui/theme';
 
 import { buscarAlimentosPorNombre } from '@/db/queries/alimentos';
 import type { Alimento } from '@/db/queries/alimentos';
@@ -205,11 +205,17 @@ export default function NuevaComida() {
 
       {/* Tres estados excluyentes: buscando, vacio, o con items cargados. */}
       {buscando ? (
-        <View>
-          {resultados.map((a) => (
+        // Los resultados van agrupados en una card, igual que las comidas del
+        // dashboard: sueltos sobre el lienzo se leian como filas flotando.
+        <View style={estilos.card}>
+          {resultados.map((a, i) => (
             <Pressable
               key={a.id}
-              style={estilos.resultado}
+              style={[
+                estilos.resultado,
+                // El separador va ADENTRO de la card, y la ultima fila no lleva.
+                i < resultados.length - 1 && estilos.resultadoSeparador,
+              ]}
               onPress={() => setSheet({ alimento: a, indice: null })}
             >
               <View style={estilos.flex}>
@@ -257,15 +263,48 @@ export default function NuevaComida() {
       {/* Pie con totales. Solo cuando hay algo cargado. */}
       {items.length > 0 && !buscando && (
         <View style={estilos.pie}>
-          <View style={estilos.totalFila}>
-            <Text style={estilos.nombre}>Total</Text>
-            <Text style={estilos.total}>{Math.round(totales.kcal)} kcal</Text>
+          <View style={estilos.cardTotal}>
+            {/* Calorias destacadas */}
+            <View style={estilos.totalCaloriasFila}>
+              <Text style={estilos.totalCaloriasLabel}>Calorías</Text>
+              <View style={estilos.totalCaloriasValorFila}>
+                <Text style={estilos.totalCaloriasNumero}>
+                  {Math.round(totales.kcal).toLocaleString('es-AR')}
+                </Text>
+                <Text style={estilos.totalCaloriasUnidad}>kcal</Text>
+              </View>
+            </View>
+
+            <View style={estilos.totalSeparador} />
+
+            {/* Los 3 macros con nombres completos y puntos de color */}
+            <View style={estilos.totalMacrosFila}>
+              <View style={estilos.totalMacroItem}>
+                <View style={[estilos.puntoMacro, { backgroundColor: colors.protein }]} />
+                <Text style={estilos.totalMacroTexto}>
+                  Proteína{' '}
+                  <Text style={estilos.totalMacroValor}>{Math.round(totales.prot)} g</Text>
+                </Text>
+              </View>
+
+              <View style={estilos.totalMacroItem}>
+                <View style={[estilos.puntoMacro, { backgroundColor: colors.carbs }]} />
+                <Text style={estilos.totalMacroTexto}>
+                  Carbohidratos{' '}
+                  <Text style={estilos.totalMacroValor}>{Math.round(totales.carb)} g</Text>
+                </Text>
+              </View>
+
+              <View style={estilos.totalMacroItem}>
+                <View style={[estilos.puntoMacro, { backgroundColor: colors.fat }]} />
+                <Text style={estilos.totalMacroTexto}>
+                  Grasas{' '}
+                  <Text style={estilos.totalMacroValor}>{Math.round(totales.grasa)} g</Text>
+                </Text>
+              </View>
+            </View>
           </View>
-          <View style={estilos.macros}>
-            <Text style={estilos.detalle}>P {Math.round(totales.prot)} g</Text>
-            <Text style={estilos.detalle}>C {Math.round(totales.carb)} g</Text>
-            <Text style={estilos.detalle}>G {Math.round(totales.grasa)} g</Text>
-          </View>
+
           <Boton titulo="Guardar comida" onPress={guardar} cargando={guardando} />
         </View>
       )}
@@ -333,11 +372,21 @@ const estilos = StyleSheet.create({
   },
   accionIcono: { fontSize: 20 },
 
+  // La card que agrupa los resultados de la busqueda. Sin padding vertical: lo
+  // pone cada fila, asi los separadores llegan de lado a lado del interior.
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    ...shadow.card,
+  },
   resultado: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.sm,
-    borderBottomWidth: 0.5,
+  },
+  resultadoSeparador: {
+    borderBottomWidth: sizes.hairline,
     borderBottomColor: colors.border,
   },
   mas: { fontSize: fontSize.title, color: colors.action, paddingHorizontal: spacing.sm },
@@ -361,14 +410,73 @@ const estilos = StyleSheet.create({
   porcion: { fontSize: fontSize.small, color: colors.action, marginTop: 2 },
 
   pie: {
-    borderTopWidth: 0.5,
-    borderTopColor: colors.border,
-    paddingTop: spacing.md,
-    gap: spacing.sm,
+    paddingTop: spacing.sm,
+    gap: spacing.md,
   },
-  totalFila: { flexDirection: 'row', justifyContent: 'space-between' },
-  total: { fontSize: fontSize.body, fontWeight: '500', color: colors.textPrimary },
-  macros: { flexDirection: 'row', gap: spacing.md },
+  cardTotal: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+    ...shadow.card,
+  },
+  totalCaloriasFila: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+  },
+  totalCaloriasLabel: {
+    fontSize: fontSize.body,
+    fontWeight: fontWeight.medium,
+    color: colors.textSecondary,
+  },
+  totalCaloriasValorFila: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.xs,
+  },
+  totalCaloriasNumero: {
+    fontSize: fontSize.title,
+    lineHeight: lineHeight.title,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  totalCaloriasUnidad: {
+    fontSize: fontSize.small,
+    color: colors.textSecondary,
+    fontWeight: fontWeight.regular,
+  },
+  totalSeparador: {
+    height: sizes.hairline,
+    backgroundColor: colors.border,
+  },
+  totalMacrosFila: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    columnGap: spacing.md,
+    rowGap: spacing.xs,
+    alignItems: 'center',
+  },
+  totalMacroItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  puntoMacro: {
+    width: 7,
+    height: 7,
+    borderRadius: radius.pill,
+  },
+  totalMacroTexto: {
+    fontSize: fontSize.small,
+    lineHeight: lineHeight.small,
+    color: colors.textSecondary,
+  },
+  totalMacroValor: {
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
 
   // Estilos del modal del selector de tipo.
   fondo: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },

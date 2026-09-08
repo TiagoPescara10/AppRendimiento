@@ -11,7 +11,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
-import { colors, spacing, radius, fontSize, lineHeight } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow, sizes } from '@/ui/theme';
 
 import { listarEventosPorRango } from '@/db/queries/eventos';
 import { materializarRutinas } from '@/features/agenda/materializar';
@@ -39,17 +39,32 @@ const MESES = [
 type Celda = { fecha: Date; clave: string; delMes: boolean };
 
 /**
- * Las 6 semanas de la grilla. Siempre 42 celdas: si la cantidad variara segun
- * el mes, la pantalla saltaria de alto al navegar.
+ * La grilla del mes: tantas semanas como haga falta para cubrirlo, ni una mas.
+ *
+ * Antes eran 42 celdas fijas (6 semanas) para que la pantalla no saltara de
+ * alto al navegar entre meses. Se cambio porque el precio era peor que el
+ * problema: los meses que entran en 5 semanas dibujaban una sexta fila entera
+ * de dias del mes siguiente, y adentro de la card blanca esa fila se lee como
+ * un error de la app, no como relleno. Un salto de alto al cambiar de mes se
+ * entiende; una fila fantasma, no.
+ *
+ * El largo es variable, asi que nadie puede indexar posiciones fijas: la
+ * ultima celda es `grilla[grilla.length - 1]`.
  */
 function armarGrilla(ancla: Date): Celda[] {
   const primero = new Date(ancla.getFullYear(), ancla.getMonth(), 1);
   // getDay() del dia 1 dice cuantas celdas de relleno van adelante.
+  const offset = primero.getDay();
   const inicio = new Date(primero);
-  inicio.setDate(1 - primero.getDay());
+  inicio.setDate(1 - offset);
+
+  // El dia 0 del mes SIGUIENTE es el ultimo del actual: asi sale la cantidad
+  // de dias sin tabla de meses ni casos de año bisiesto.
+  const diasDelMes = new Date(ancla.getFullYear(), ancla.getMonth() + 1, 0).getDate();
+  const semanas = Math.ceil((diasDelMes + offset) / 7);
 
   const celdas: Celda[] = [];
-  for (let i = 0; i < 42; i++) {
+  for (let i = 0; i < semanas * 7; i++) {
     const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i);
     celdas.push({
       fecha: d,
@@ -110,10 +125,13 @@ export default function Agenda() {
         // El rango cubre la grilla entera, no solo el mes: los dias de relleno
         // tambien muestran su punto.
         const desde = grilla[0].fecha;
+        // La ultima del array, no la 41: la grilla mide 4, 5 o 6 semanas segun
+        // el mes, asi que la posicion 41 puede no existir.
+        const ultima = grilla[grilla.length - 1].fecha;
         const hasta = new Date(
-          grilla[41].fecha.getFullYear(),
-          grilla[41].fecha.getMonth(),
-          grilla[41].fecha.getDate(),
+          ultima.getFullYear(),
+          ultima.getMonth(),
+          ultima.getDate(),
           23, 59, 59,
         );
 
@@ -136,7 +154,7 @@ export default function Agenda() {
   );
 
   // Un Map de "YYYY-MM-DD" a los tipos de ese dia. Se arma una vez por render
-  // en vez de filtrar el array en cada una de las 42 celdas.
+  // en vez de filtrar el array en cada celda de la grilla.
   const porDia = useMemo(() => {
     const m = new Map<string, TipoEvento[]>();
     for (const e of eventosDelMes) {
@@ -165,90 +183,101 @@ export default function Agenda() {
 
   return (
     <Pantalla>
-      {/* Navegacion de mes */}
-      <View style={estilos.mesFila}>
-        <Pressable onPress={() => cambiarMes(-1)} hitSlop={12}>
-          <Text style={estilos.flecha}>‹</Text>
-        </Pressable>
-        <Text style={estilos.mes}>
-          {MESES[ancla.getMonth()]}
-          {ancla.getFullYear() !== new Date().getFullYear() && ` ${ancla.getFullYear()}`}
-        </Text>
-        <Pressable onPress={() => cambiarMes(1)} hitSlop={12}>
-          <Text style={estilos.flecha}>›</Text>
-        </Pressable>
-      </View>
+      {/* Calendario completo en card blanca */}
+      <View style={estilos.cardCalendario}>
+        {/* Navegacion de mes */}
+        <View style={estilos.mesFila}>
+          <Pressable onPress={() => cambiarMes(-1)} hitSlop={12}>
+            <Text style={estilos.flecha}>‹</Text>
+          </Pressable>
+          <Text style={estilos.mes}>
+            {MESES[ancla.getMonth()]}
+            {ancla.getFullYear() !== new Date().getFullYear() && ` ${ancla.getFullYear()}`}
+          </Text>
+          <Pressable onPress={() => cambiarMes(1)} hitSlop={12}>
+            <Text style={estilos.flecha}>›</Text>
+          </Pressable>
+        </View>
 
-      <View style={estilos.cabecera}>
-        {DIAS_CABECERA.map((d, i) => (
-          <Text key={i} style={estilos.cabeceraDia}>{d}</Text>
-        ))}
-      </View>
+        <View style={estilos.cabecera}>
+          {DIAS_CABECERA.map((d, i) => (
+            <Text key={i} style={estilos.cabeceraDia}>{d}</Text>
+          ))}
+        </View>
 
-      <View style={estilos.grilla}>
-        {grilla.map((celda) => {
-          const tipos = porDia.get(celda.clave) ?? [];
-          const esHoy = celda.clave === hoy;
+        <View style={estilos.grilla}>
+          {grilla.map((celda) => {
+            const tipos = porDia.get(celda.clave) ?? [];
+            const esHoy = celda.clave === hoy;
 
-          return (
-            <Pressable
-              key={celda.clave}
-              style={[estilos.celda, esHoy && estilos.celdaHoy]}
-              onPress={() => router.push(`/evento/dia/${celda.clave}`)}
-            >
-              <Text
-                style={[
-                  estilos.numero,
-                  !celda.delMes && estilos.numeroFuera,
-                  esHoy && estilos.numeroHoy,
-                ]}
+            return (
+              <Pressable
+                key={celda.clave}
+                style={[estilos.celda, esHoy && estilos.celdaHoy]}
+                onPress={() => router.push(`/evento/dia/${celda.clave}`)}
               >
-                {celda.fecha.getDate()}
-              </Text>
-              {/* El contenedor va siempre: sin el, las celdas con punto corren
-                  el numero hacia arriba y la grilla queda despareja. */}
-              <View style={estilos.puntoEspacio}>
-                {tipos.length > 0 && (
-                  <View
-                    style={[
-                      estilos.punto,
-                      tipos.some(esDestacado) && estilos.puntoDestacado,
-                      esHoy && estilos.puntoHoy,
-                    ]}
-                  />
-                )}
-              </View>
-            </Pressable>
-          );
-        })}
+                <Text
+                  style={[
+                    estilos.numero,
+                    !celda.delMes && estilos.numeroFuera,
+                    esHoy && estilos.numeroHoy,
+                  ]}
+                >
+                  {celda.fecha.getDate()}
+                </Text>
+                {/* El contenedor va siempre: sin el, las celdas con punto corren
+                    el numero hacia arriba y la grilla queda despareja. */}
+                <View style={estilos.puntoEspacio}>
+                  {tipos.length > 0 && (
+                    <View
+                      style={[
+                        estilos.punto,
+                        tipos.some(esDestacado) && estilos.puntoDestacado,
+                        esHoy && estilos.puntoHoy,
+                      ]}
+                    />
+                  )}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
       {/* Sin esto el mes se ve lindo pero no dice que hacer hoy. */}
       <Text style={estilos.seccion}>Esta semana</Text>
 
-      {semana.length === 0 ? (
-        <View style={estilos.vacio}>
-          <Text style={estilos.detalle}>No tenés nada agendado esta semana.</Text>
-        </View>
-      ) : (
-        semana.map((e) => (
-          <Pressable
-            key={e.id}
-            style={estilos.evento}
-            onPress={() => router.push(`/evento/${e.id}`)}
-          >
-            <Text style={estilos.diaCorto}>
-              {e.fecha === hoy
-                ? 'Hoy'
-                : new Date(`${e.fecha}T00:00:00`).toLocaleDateString('es-AR', {
-                    weekday: 'short',
-                  })}
-            </Text>
-            <Text style={[estilos.nombre, estilos.flex]}>{ETIQUETA_TIPO[e.tipo]}</Text>
-            <Text style={estilos.detalle}>{horaDe(e.fecha_hora_inicio)}</Text>
-          </Pressable>
-        ))
-      )}
+      {/* Todo adentro de una card, igual que las comidas del dashboard: se lee
+          como un bloque y no como filas flotando sobre el lienzo. */}
+      <View style={estilos.card}>
+        {semana.length === 0 ? (
+          <View style={estilos.vacio}>
+            <Text style={estilos.detalle}>No tenés nada agendado esta semana.</Text>
+          </View>
+        ) : (
+          semana.map((e, i) => (
+            <Pressable
+              key={e.id}
+              style={[
+                estilos.evento,
+                // El separador va ADENTRO de la card, y la ultima fila no lleva.
+                i < semana.length - 1 && estilos.eventoSeparador,
+              ]}
+              onPress={() => router.push(`/evento/${e.id}`)}
+            >
+              <Text style={estilos.diaCorto}>
+                {e.fecha === hoy
+                  ? 'Hoy'
+                  : new Date(`${e.fecha}T00:00:00`).toLocaleDateString('es-AR', {
+                      weekday: 'short',
+                    })}
+              </Text>
+              <Text style={[estilos.nombre, estilos.flex]}>{ETIQUETA_TIPO[e.tipo]}</Text>
+              <Text style={estilos.detalle}>{horaDe(e.fecha_hora_inicio)}</Text>
+            </Pressable>
+          ))
+        )}
+      </View>
 
       <Boton titulo="Agregar evento" onPress={() => router.push('/evento/nuevo')} />
     </Pantalla>
@@ -261,11 +290,30 @@ const estilos = StyleSheet.create({
   flex: { flex: 1 },
   centrado: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
+  // Card del calendario. Padding chico para que las 7 columnas respiren
+  // sin achicar las celdas. La navegacion de mes va adentro.
+  //
+  // paddingBottom 0 y no spacing.md: la celda ya trae su propio aire abajo. Es
+  // cuadrada (aspectRatio 1, ~49px) y su contenido mide ~31 (numero + hueco del
+  // punto), asi que centrado deja ~9px libres, y debajo del numero hay otros
+  // 10 del hueco del punto, casi siempre vacio. Eso son ~19px que hacen de
+  // padding solos; sumarles 12 mas era lo que dejaba el fondo de la card
+  // pareciendo una fila de mas.
+  cardCalendario: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.md,
+    paddingBottom: 0,
+    gap: spacing.sm,
+    ...shadow.card,
+  },
+
   mesFila: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.xs,
   },
   flecha: { fontSize: fontSize.title, color: colors.textSecondary },
   mes: {
@@ -305,14 +353,24 @@ const estilos = StyleSheet.create({
     fontSize: fontSize.small,
     fontWeight: '500',
     color: colors.textSecondary,
-    marginTop: spacing.md,
+    marginTop: spacing.xs,
+  },
+  // La card de "Esta semana". Sin padding vertical: lo pone cada fila, asi los
+  // separadores llegan de lado a lado del interior.
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    ...shadow.card,
   },
   evento: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     paddingVertical: spacing.md,
-    borderBottomWidth: 0.5,
+  },
+  eventoSeparador: {
+    borderBottomWidth: sizes.hairline,
     borderBottomColor: colors.border,
   },
   diaCorto: { fontSize: fontSize.small, color: colors.textSecondary, width: 36 },

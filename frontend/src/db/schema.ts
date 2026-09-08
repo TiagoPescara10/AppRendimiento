@@ -160,6 +160,42 @@ export interface RutinaRow {
   updated_at: string;
 }
 
+/**
+ * Detalle de una sesion del temporizador de intervalos.
+ *
+ * Cuelga del evento: el usuario, la fecha y el tipo ya viven ahi y no se
+ * duplican. Se guarda lo CONFIGURADO y lo COMPLETADO por separado, porque
+ * programar 6 bloques y cortar en el 4 son dos hechos distintos.
+ */
+export interface SesionEntrenamientoRow {
+  id: string;
+  evento_id: string;
+
+  // lo configurado
+  bloques: number;
+  pasadas: number;
+  /** 0 = cronometro, o sea trabajo sin limite. Ver esCronometro(). */
+  trabajo_seg: number;
+  descanso_seg: number;
+  descanso_bloque_seg: number;
+
+  // lo que se hizo
+  bloques_completados: number;
+  /**
+   * TOTAL de pasadas de la sesion entera, no las del ultimo bloque: 6 bloques
+   * de 8 completos son 48. El bloque actual sale de dividir; al reves no se
+   * puede reconstruir el total. Misma unidad que duracion_real_seg.
+   */
+  pasadas_completadas: number;
+  duracion_real_seg: number;
+
+  /** Solo el cronometro la tiene. null en cualquier sesion de pasadas. */
+  distancia_km: number | null;
+
+  created_at: string;
+  updated_at: string;
+}
+
 export interface RegistroSuenoRow {
   id: string;
   usuario_id: string;

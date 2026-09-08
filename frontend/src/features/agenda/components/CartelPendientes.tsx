@@ -144,7 +144,9 @@ const estilos = StyleSheet.create({
     backgroundColor: colors.overlay,
   },
   cartel: {
-    backgroundColor: colors.bg,
+    // Blanco y no bg: esto es un dialogo centrado con margen a los cuatro
+    // lados, o sea una card. El crema es fondo de pantalla, no de un bloque.
+    backgroundColor: colors.surface,
     borderRadius: radius.lg,
     padding: spacing.lg,
     gap: spacing.sm,

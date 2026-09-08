@@ -1,5 +1,10 @@
 // Detalle de un dia de la agenda. Muestra los eventos de esa fecha con sus
-// acciones: arrancar el temporizador, marcarlo hecho a mano, o borrarlo.
+// acciones: marcarlo hecho a mano, o borrarlo.
+//
+// De aca no se arranca ningun temporizador. Un entrenamiento agendado es algo
+// a lo que vas y hacés lo que te dicen: la app solo pregunta si fuiste. El
+// temporizador es para el entrenamiento propio y sale de "Entrenar", en el
+// dashboard, sin evento previo.
 //
 // La fecha llega por la ruta como "YYYY-MM-DD" local, que es exactamente el
 // formato de la columna generada `fecha` de evento. Compara directo, sin
@@ -16,7 +21,6 @@ import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/them
 import { listarEventosPorFecha, marcarCompletado, eliminarEvento } from '@/db/queries/eventos';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import { ETIQUETA_TIPO, ETIQUETA_INTENSIDAD, horaDe, partesFecha } from '@/features/agenda/formato';
-import { aFechaLocal } from '@/lib/fechas';
 import type { EventoRow } from '@/db/schema';
 
 // ---------------------------------------------------------------------------
@@ -86,15 +90,6 @@ export default function DiaAgenda() {
     ]);
   };
 
-  /**
-   * Al temporizador. No se marca nada aca: el evento queda hecho cuando la
-   * sesion termina de verdad, y de eso se encarga la pantalla del temporizador.
-   * Si el usuario abandona a la mitad, no tiene que quedar rastro.
-   */
-  const empezar = (id: string) => {
-    router.push({ pathname: '/evento/temporizador', params: { id } });
-  };
-
   if (cargando) {
     return (
       <Pantalla scroll={false}>
@@ -106,7 +101,6 @@ export default function DiaAgenda() {
   }
 
   const { dia, mes } = partesFecha(fecha);
-  const esPasado = fecha < aFechaLocal(new Date());
 
   return (
     <Pantalla>
@@ -144,29 +138,20 @@ export default function DiaAgenda() {
               )}
             </View>
 
-            {/* Las acciones cambian segun el estado. Un evento ya hecho solo
-                se puede deshacer o borrar. */}
+            {/* Dos estados, no tres: hecho o pendiente. Da igual que el evento
+                sea de hoy o de la semana pasada, se marca igual. */}
             <View style={estilos.acciones}>
               {e.completado === 1 ? (
                 <Pressable style={estilos.accionSecundaria} onPress={() => marcar(e.id, false)}>
                   <Text style={estilos.accionSecundariaTexto}>Deshacer</Text>
                 </Pressable>
               ) : (
-                <>
-                  {!esPasado && (
-                    <Pressable style={estilos.accionPrimaria} onPress={() => empezar(e.id)}>
-                      <Text style={estilos.accionPrimariaTexto}>Empezar</Text>
-                    </Pressable>
-                  )}
-                  <Pressable
-                    style={[estilos.accionSecundaria, esPasado && estilos.flex]}
-                    onPress={() => marcar(e.id, true)}
-                  >
-                    <Text style={estilos.accionSecundariaTexto}>
-                      {esPasado ? 'Marcar como hecho' : '✓'}
-                    </Text>
-                  </Pressable>
-                </>
+                <Pressable
+                  style={[estilos.accionSecundaria, estilos.flex]}
+                  onPress={() => marcar(e.id, true)}
+                >
+                  <Text style={estilos.accionSecundariaTexto}>Marcar como hecho</Text>
+                </Pressable>
               )}
 
               <Pressable style={estilos.accionSecundaria} onPress={() => borrar(e.id)}>
@@ -215,14 +200,6 @@ const estilos = StyleSheet.create({
   tagTexto: { fontSize: fontSize.small, color: colors.textOnAccentSoft },
 
   acciones: { flexDirection: 'row', gap: spacing.xs },
-  accionPrimaria: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.action,
-    alignItems: 'center',
-  },
-  accionPrimariaTexto: { fontSize: fontSize.small, color: colors.textOnAction },
   accionSecundaria: {
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,

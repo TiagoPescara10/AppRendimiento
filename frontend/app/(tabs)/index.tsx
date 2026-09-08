@@ -21,6 +21,13 @@ import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import { ultimoPeso } from '@/db/queries/peso';
 import { listarComidasPorFecha, listarItemsConAlimento } from '@/db/queries/comidas';
 import { CartelPendientes } from '@/features/agenda/components/CartelPendientes';
+import { proximosEventos } from '@/db/queries/eventos';
+import { MascotaLeon } from '@/features/mascota/MascotaLeon';
+import {
+  obtenerConsejoLeon,
+  type ConsejoLeon,
+  type EventoProximoResumen,
+} from '@/features/mascota/logicaConsejos';
 import type { TipoComida } from '@/db/schema';
 import { calcularEdad, aFechaLocal } from '@/lib/fechas';
 
@@ -45,9 +52,11 @@ type ComidaResumen = {
 type Estado = {
   /** El cartel de eventos sin responder lo necesita para su consulta. */
   usuarioId: string;
+  nombreUsuario: string | null;
   objetivo: ResultadoNutricional | null;
   consumido: Macros;
   comidas: ComidaResumen[];
+  consejo: ConsejoLeon;
 };
 
 const VACIO: Macros = { kcal: 0, prot: 0, carb: 0, grasa: 0 };
@@ -78,9 +87,12 @@ export default function Dashboard() {
         if (!perfil) return;
 
         const hoy = aFechaLocal(new Date());
-        const [peso, comidas] = await Promise.all([
+        const ahoraIso = new Date().toISOString();
+        const mananaIso = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+        const [peso, comidas, proximos] = await Promise.all([
           ultimoPeso(perfil.id),
           listarComidasPorFecha(perfil.id, hoy),
+          proximosEventos(perfil.id, ahoraIso, mananaIso, 1),
         ]);
 
         // Una query de items por comida. Con 3-5 comidas por dia es barato;
@@ -126,11 +138,38 @@ export default function Dashboard() {
           return acc;
         }, { ...VACIO });
 
+        const primerEvento = proximos?.[0];
+        let eventoResumen: EventoProximoResumen | null = null;
+        if (primerEvento) {
+          const diffMs = new Date(primerEvento.fecha_hora_inicio).getTime() - Date.now();
+          const minutosParaInicio = Math.round(diffMs / 60000);
+          eventoResumen = {
+            id: primerEvento.id,
+            titulo:
+              primerEvento.tipo === 'partido'
+                ? 'partido'
+                : primerEvento.tipo === 'entrenamiento'
+                ? 'entrenamiento'
+                : 'tu sesión',
+            tipo: primerEvento.tipo,
+            horaInicio: primerEvento.fecha_hora_inicio,
+            minutosParaInicio,
+          };
+        }
+
+        const consejo = obtenerConsejoLeon({
+          consumido,
+          objetivo,
+          proximoEvento: eventoResumen,
+        });
+
         if (!vivo) return;
         setEstado({
           usuarioId: perfil.id,
+          nombreUsuario: perfil.nombre,
           objetivo,
           consumido,
+          consejo,
           comidas: conItems.map(({ comida, items }) => ({
             id: comida.id,
             tipo: comida.tipo,
@@ -151,7 +190,7 @@ export default function Dashboard() {
 
   if (!estado) {
     return (
-      <Pantalla style={{ paddingTop: 0 }}>
+      <Pantalla>
         <Text style={estilos.detalle}>Cargando…</Text>
       </Pantalla>
     );
@@ -163,17 +202,22 @@ export default function Dashboard() {
   const proporcion = meta > 0 ? Math.min(1, consumido.kcal / meta) : 0;
   const seExcedio = restante < 0;
 
-  const fecha = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric' });
+  const fecha = new Date().toLocaleDateString('es-AR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
 
   return (
-    <Pantalla style={{ paddingTop: 0 }}>
-      <View style={estilos.header}>
-        <Text style={estilos.titulo}>Hoy</Text>
-        <Text style={estilos.fecha}>{capitalizar(fecha)}</Text>
-      </View>
+    <Pantalla style={estilos.pantalla}>
+      {/* El leon reemplaza el encabezado: avatar, saludo y fecha en una sola linea */}
+      <MascotaLeon
+        consejo={estado.consejo}
+        nombreUsuario={estado.nombreUsuario}
+        fechaTexto={fecha}
+      />
 
-      {/* Lo que queda del dia. Si se paso, cambia el texto en vez de mostrar
-          un negativo suelto: dice lo mismo y no se lee como un error. */}
+      {/* Lo que queda del dia */}
       <View style={estilos.destacado}>
         <Text style={estilos.destacadoLabel}>
           {seExcedio ? 'Te pasaste por' : 'Te quedan'}
@@ -193,8 +237,7 @@ export default function Dashboard() {
         </View>
       </View>
 
-      {/* Macros. Orden y color fijos: el usuario aprende que el rosa es
-          proteina y despues lee de un vistazo. */}
+      {/* Macros */}
       {objetivo && (
         <View style={estilos.macros}>
           <Macro
@@ -220,21 +263,18 @@ export default function Dashboard() {
 
       <Text style={estilos.seccion}>Comiste</Text>
 
-      {/* Todo adentro de una card: se lee como un bloque y no como items
-          flotando sobre el lienzo. Solo aparecen las comidas registradas; las
-          que faltan no se listan en gris, porque se leen como un reproche. */}
-      <View style={estilos.card}>
-        {comidas.length === 0 ? (
-          <View style={estilos.vacio}>
-            <Text style={estilos.detalle}>Todavía no registraste nada hoy.</Text>
-          </View>
-        ) : (
-          comidas.map((c, i) => (
+      {/* Estado vacio que ocupa el espacio sobrante en el lienzo, sin card blanca */}
+      {comidas.length === 0 ? (
+        <View style={estilos.vacioSobrante}>
+          <Text style={estilos.vacioTexto}>Todavía no registraste nada hoy.</Text>
+        </View>
+      ) : (
+        <View style={estilos.card}>
+          {comidas.map((c, i) => (
             <Pressable
               key={c.id}
               style={({ pressed }) => [
                 estilos.comida,
-                // El separador va ADENTRO de la card, y la ultima fila no lleva.
                 i < comidas.length - 1 && estilos.comidaSeparador,
                 pressed && estilos.comidaPresionada,
               ]}
@@ -248,11 +288,14 @@ export default function Dashboard() {
                   </Text>
                 )}
               </View>
-              <Text style={estilos.comidaKcal}>{c.kcal}</Text>
+              <View style={estilos.comidaKcalColumna}>
+                <Text style={estilos.comidaKcal}>{c.kcal.toLocaleString('es-AR')}</Text>
+                <Text style={estilos.comidaKcalUnidad}>kcal</Text>
+              </View>
             </Pressable>
-          ))
-        )}
-      </View>
+          ))}
+        </View>
+      )}
 
       {/* Entrenar va aca y no escondido: el temporizador sirve para el
           entrenamiento propio, y hasta ahora solo se llegaba desde un evento
@@ -366,34 +409,28 @@ function Macro({
 const estilos = StyleSheet.create({
   flex: { flex: 1 },
 
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  titulo: {
-    fontSize: fontSize.title,
-    lineHeight: lineHeight.title,
-    fontWeight: '500',
-    color: colors.textPrimary,
+  pantalla: {
+    gap: spacing.md,
+    paddingBottom: spacing.lg,
   },
-  fecha: { fontSize: fontSize.small, color: colors.textSecondary },
 
   destacado: {
-    // Blanco, no surfaceAlt: es la card principal del dashboard y el esquema
-    // dice que el contenido va en blanco. En crema sobre crema casi no se
-    // despegaba del lienzo.
     backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
+    borderRadius: radius.md,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.md,
     alignItems: 'center',
     ...shadow.card,
   },
   destacadoLabel: {
-    fontSize: fontSize.small,
-    lineHeight: lineHeight.small,
+    fontSize: fontSize.caption,
+    lineHeight: lineHeight.caption,
     color: colors.textSecondary,
   },
   destacadoNumero: {
-    fontSize: fontSize.title,
-    lineHeight: lineHeight.title,
-    fontWeight: 'bold',
+    fontSize: fontSize.display,
+    lineHeight: lineHeight.display,
+    fontWeight: fontWeight.bold,
     color: colors.textPrimary,
   },
   excedido: { color: colors.danger },
@@ -403,7 +440,7 @@ const estilos = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: colors.border,
     overflow: 'hidden',
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
   },
   barraRelleno: { height: '100%', backgroundColor: colors.action },
   barraExcedida: { backgroundColor: colors.danger },
@@ -413,35 +450,37 @@ const estilos = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface,
     borderRadius: radius.md,
-    padding: spacing.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
     gap: spacing.xs,
     ...shadow.card,
   },
-  macroLabel: { fontSize: fontSize.small, color: colors.textSecondary },
-  macroValor: { fontSize: fontSize.body, fontWeight: '500', color: colors.textPrimary },
-  macroObjetivo: { fontSize: fontSize.small, color: colors.textSecondary },
+  macroLabel: { fontSize: fontSize.caption, color: colors.textSecondary },
+  macroValor: { fontSize: fontSize.body, fontWeight: fontWeight.medium, color: colors.textPrimary },
+  macroObjetivo: { fontSize: fontSize.caption, color: colors.textSecondary },
   macroBarraFondo: {
     height: 4,
     borderRadius: 2,
     backgroundColor: colors.border,
     overflow: 'hidden',
+    marginTop: spacing.xs,
   },
   macroBarraProteina: { height: '100%', backgroundColor: colors.protein },
   macroBarraCarbos: { height: '100%', backgroundColor: colors.carbs },
   macroBarraGrasas: { height: '100%', backgroundColor: colors.fat },
 
   seccion: {
-    fontSize: fontSize.small,
-    fontWeight: '500',
+    fontSize: fontSize.caption,
+    fontWeight: fontWeight.bold,
     color: colors.textSecondary,
-    marginTop: spacing.md,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: spacing.sm,
   },
-  // La card de comidas. Sin padding vertical: lo pone cada fila, asi los
-  // separadores llegan de lado a lado del interior.
   card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
     ...shadow.card,
   },
   comida: {
@@ -455,35 +494,53 @@ const estilos = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   comidaPresionada: { opacity: 0.6 },
-  comidaTipo: { fontSize: fontSize.body, color: colors.textPrimary },
+  comidaTipo: { fontSize: fontSize.body, color: colors.textPrimary, fontWeight: fontWeight.medium },
   comidaAlimentos: {
     fontSize: fontSize.caption,
     lineHeight: lineHeight.caption,
     color: colors.textSecondary,
   },
-  comidaKcal: { fontSize: fontSize.body, color: colors.textPrimary },
+  comidaKcalColumna: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  comidaKcal: { fontSize: fontSize.body, fontWeight: fontWeight.medium, color: colors.textPrimary },
+  comidaKcalUnidad: {
+    fontSize: fontSize.caption,
+    lineHeight: lineHeight.caption,
+    color: colors.textSecondary,
+  },
+
+  // Vacio sobre el lienzo sin card blanca ni elevacion
+  vacioSobrante: {
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vacioTexto: {
+    fontSize: fontSize.small,
+    color: colors.textMuted,
+  },
 
   // Los dos botones: mismo ancho (flex 1) y el icono arriba del texto.
-  acciones: { flexDirection: 'row', gap: spacing.sm },
+  acciones: { flexDirection: 'row', gap: spacing.xs },
   accion: {
     flex: 1,
-    paddingVertical: spacing.md,
+    paddingVertical: 10,
     borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.xs,
+    gap: 3,
   },
   accionPrimaria: { backgroundColor: colors.action },
   accionPrimariaPresionada: { backgroundColor: colors.actionPressed },
-  // Borde de accion, no de border: tiene que leerse como el par del primario
-  // y no como una card mas.
   accionSecundaria: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.action,
   },
   accionSecundariaPresionada: { backgroundColor: colors.surfaceAlt },
-  accionTexto: { fontSize: fontSize.small, fontWeight: fontWeight.medium },
+  accionTexto: { fontSize: fontSize.caption, fontWeight: fontWeight.bold },
   accionTextoPrimario: { color: colors.textOnAction },
   accionTextoSecundario: { color: colors.action },
 

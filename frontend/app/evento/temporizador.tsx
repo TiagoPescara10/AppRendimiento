@@ -1,5 +1,7 @@
-// Temporizador de intervalos. Se llega desde "Empezar" en /evento/dia/[fecha]
-// y recibe el id del evento por query param.
+// Temporizador de intervalos. Se llega desde "Entrenar" en el dashboard, sin
+// evento previo: es para el entrenamiento propio, el que armas vos. A un
+// entrenamiento de club o gimnasio la app no lo cronometra, solo pregunta si
+// fuiste, asi que desde la agenda ya no se entra aca.
 //
 // La pantalla no calcula nada: todo lo que es estructura, fases y cuentas vive
 // en features/entrenamiento/temporizador.ts, que son funciones puras. Aca solo
@@ -13,15 +15,18 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { View, Text, Pressable, StyleSheet, Alert, AppState } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
 import { Card } from '@/ui/Card';
+import { Input } from '@/ui/Input';
 import { colors, spacing, radius, fontSize, lineHeight, fontWeight, sizes } from '@/ui/theme';
 
-import { responderEvento } from '@/db/queries/eventos';
+import { obtenerPerfilLocal } from '@/db/queries/perfil';
+import { actualizarDistancia } from '@/db/queries/sesiones';
+import { guardarSesionTerminada } from '@/features/entrenamiento/guardarSesion';
 import { FilaNumero } from '@/features/entrenamiento/components/FilaNumero';
 import { Anillo } from '@/features/entrenamiento/components/Anillo';
 import { VistaPrevia } from '@/features/entrenamiento/components/VistaPrevia';
@@ -31,12 +36,15 @@ import {
   PRESETS,
   presetActivo,
   ajustarConfig,
+  calcularRitmo,
   construirPlan,
   duracionTotalMs,
   esCronometro,
   estaPausado,
+  formatearDecimal,
   formatearSegundos,
   iniciarReloj,
+  parsearDistancia,
   pausarReloj,
   posicionEn,
   reanudarReloj,
@@ -90,7 +98,6 @@ const FONDO_FASE: Record<TipoFase, string> = {
 
 export default function Temporizador() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id?: string }>();
 
   const [config, setConfig] = useState<ConfigTemporizador>(CONFIG_POR_DEFECTO);
   const [plan, setPlan] = useState<Fase[]>([]);
@@ -100,6 +107,11 @@ export default function Temporizador() {
   const [ahora, setAhora] = useState(() => Date.now());
   const [finalizada, setFinalizada] = useState(false);
   const [totalFinalMs, setTotalFinalMs] = useState(0);
+
+  // Lo que queda de la sesion ya guardada. `sesionId` es null hasta que la
+  // escritura vuelve; la distancia se carga contra el despues.
+  const [sesionId, setSesionId] = useState<string | null>(null);
+  const [distanciaTexto, setDistanciaTexto] = useState('');
 
   const cronometro = esCronometro(config);
   // Se recalcula en cada render en vez de guardarse: asi tocar un +/- desmarca
@@ -170,27 +182,58 @@ export default function Temporizador() {
     if (pos.llevaMs <= GRACIA_PITIDO_MS) reproducir(pitidoDeFase(pos.fase.tipo));
   }, [pos, corriendo]);
 
-  const marcarHecho = useCallback(async () => {
-    // Sin id la pantalla igual funciona como temporizador suelto; simplemente
-    // no hay evento que marcar.
-    if (!id) return;
-    try {
-      await responderEvento(id, true);
-    } catch (e) {
-      console.error('Error al marcar el evento:', e);
-      Alert.alert('Error', 'El entrenamiento terminó, pero no se pudo marcar el evento.');
-    }
-  }, [id]);
+  /**
+   * Deja el entrenamiento registrado: el evento y el detalle de la sesion.
+   *
+   * El evento se crea retroactivo, siempre: aca nunca hay uno agendado del que
+   * venir. Toda esa politica esta en features/entrenamiento/guardarSesion.ts;
+   * aca solo se la llama.
+   */
+  const guardar = useCallback(
+    async (duracionRealMs: number) => {
+      if (!reloj) return;
+      try {
+        const perfil = await obtenerPerfilLocal();
+        if (!perfil) {
+          console.warn('Sin perfil local: la sesion no se guarda.');
+          return;
+        }
+
+        const r = await guardarSesionTerminada({
+          usuarioId: perfil.id,
+          config,
+          plan,
+          inicio: new Date(reloj.inicioMs),
+          duracionRealMs,
+        });
+
+        setSesionId(r.sesion.id);
+      } catch (e) {
+        console.error('Error al guardar la sesion:', e);
+        Alert.alert('Error', 'El entrenamiento terminó, pero no se pudo guardar.');
+      }
+    },
+    [config, plan, reloj],
+  );
+
+  // Una sola escritura por sesion. En un ref y no en estado porque tiene que
+  // valer YA, en la misma pasada del efecto: el efecto de abajo depende de
+  // `guardar`, que cambia de identidad, y sin esto una segunda corrida crearia
+  // un evento y una sesion duplicados.
+  const yaGuardo = useRef(false);
 
   // El unico lugar que da la sesion por completada. Todo lo que termina bien
   // pasa por setFinalizada(true) y cae aca: el plan que se acaba solo y el
   // cronometro que el usuario para a mano.
   useEffect(() => {
-    if (!finalizada || !reloj) return;
+    if (!finalizada || !reloj || yaGuardo.current) return;
+    yaGuardo.current = true;
+
     reproducir('fin');
-    setTotalFinalMs(duracionTotalMs(plan) ?? transcurridoMs(reloj, Date.now()));
-    void marcarHecho();
-  }, [finalizada, reloj, plan, marcarHecho]);
+    const total = duracionTotalMs(plan) ?? transcurridoMs(reloj, Date.now());
+    setTotalFinalMs(total);
+    void guardar(total);
+  }, [finalizada, reloj, plan, guardar]);
 
   // --- pantalla despierta -------------------------------------------------
 
@@ -276,20 +319,74 @@ export default function Temporizador() {
     );
   };
 
+  /**
+   * Salir de la pantalla de "Listo". Antes de irse guarda la distancia, que es
+   * lo unico que todavia puede estar sin escribir.
+   *
+   * Va al salir y no en cada tecla: son los km de una sesion que ya esta
+   * guardada, no hay nada que perder si el usuario no llega a tocar el boton.
+   */
+  const volver = async () => {
+    const km = parsearDistancia(distanciaTexto);
+    if (sesionId && km !== null) {
+      try {
+        await actualizarDistancia(sesionId, km);
+      } catch (e) {
+        // No frena la vuelta: la sesion ya quedo guardada, esto era el extra.
+        console.error('Error al guardar la distancia:', e);
+      }
+    }
+    router.back();
+  };
+
   // -------------------------------------------------------------------------
   // Terminado
   // -------------------------------------------------------------------------
 
   if (finalizada) {
     const minutos = Math.max(1, Math.round(totalFinalMs / 60000));
+
+    // null mientras el campo este vacio o tenga cualquier cosa. Es opcional de
+    // verdad: no bloquea nada, solo deja de mostrar el ritmo.
+    const distanciaKm = parsearDistancia(distanciaTexto);
+    const ritmo = calcularRitmo(distanciaKm, Math.round(totalFinalMs / 1000));
+
     return (
       <Pantalla scroll={false} style={estilos.centrada}>
         <Text style={estilos.tituloFinal}>Listo</Text>
         <Text style={estilos.detalle}>
           {minutos} {minutos === 1 ? 'minuto' : 'minutos'} de entrenamiento
         </Text>
-        {id ? <Text style={estilos.detalle}>Ya quedó marcado como hecho.</Text> : null}
-        <Boton titulo="Volver" onPress={() => router.back()} ancho />
+
+        {/* La distancia se pregunta SOLO en el cronometro: una sesion de
+            pasadas no tiene kilometros. */}
+        {cronometro && (
+          <View style={estilos.distancia}>
+            <Input
+              label="Distancia (opcional)"
+              value={distanciaTexto}
+              onChangeText={setDistanciaTexto}
+              placeholder="Ej: 6,2"
+              keyboardType="decimal-pad"
+            />
+
+            {ritmo && distanciaKm !== null && (
+              <View style={estilos.ritmo}>
+                <Text style={estilos.detalle}>
+                  {formatearDecimal(distanciaKm)} km en {minutos} min
+                </Text>
+                {/* El min/km va grande y el km/h chico: el ritmo es el numero
+                    que mira la gente que corre. */}
+                <Text style={estilos.ritmoPrincipal}>Ritmo {ritmo.ritmoTexto} min/km</Text>
+                <Text style={estilos.ritmoSecundario}>{ritmo.velocidadTexto} km/h</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        <Text style={estilos.detalle}>Lo guardamos en tu agenda.</Text>
+
+        <Boton titulo="Volver" onPress={volver} ancho />
       </Pantalla>
     );
   }
@@ -644,6 +741,22 @@ const estilos = StyleSheet.create({
   detalle: {
     fontSize: fontSize.body,
     lineHeight: lineHeight.body,
+    color: colors.textSecondary,
+  },
+
+  // alignSelf stretch porque la pantalla de "Listo" centra a sus hijos: sin
+  // esto el Input se encoge al ancho de su texto.
+  distancia: { alignSelf: 'stretch', gap: spacing.md },
+  ritmo: { alignItems: 'center', gap: spacing.xs },
+  ritmoPrincipal: {
+    fontSize: fontSize.title,
+    lineHeight: lineHeight.title,
+    fontWeight: fontWeight.medium,
+    color: colors.textPrimary,
+  },
+  ritmoSecundario: {
+    fontSize: fontSize.small,
+    lineHeight: lineHeight.small,
     color: colors.textSecondary,
   },
 });
