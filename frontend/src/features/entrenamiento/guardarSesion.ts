@@ -79,6 +79,8 @@ export async function guardarSesionTerminada(
   let sesion: SesionEntrenamientoRow | null = null;
 
   await getDb().withTransactionAsync(async () => {
+    const modoCalculado = config.trabajoSeg === 0 ? 'cronometro' : 'pasadas';
+
     await crearEvento({
       id: idEvento,
       usuario_id: usuarioId,
@@ -88,11 +90,13 @@ export async function guardarSesionTerminada(
       intensidad: intensidadDe(config),
       completado: true,
       respondido: true,
+      modo_entrenamiento: modoCalculado,
     });
 
     sesion = await crearSesion({
       id: randomUUID(),
       evento_id: idEvento,
+      modo: modoCalculado,
       bloques: config.bloques,
       pasadas: config.pasadas,
       trabajo_seg: config.trabajoSeg,

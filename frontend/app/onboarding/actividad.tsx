@@ -7,6 +7,7 @@ import { PasoOnboarding } from '@/features/perfil/components/PasoOnboarding';
 import { NivelActividad } from '@/db/schema';
 import { ListaOpciones } from '@/ui/ListaOpciones';
 import { Input } from '@/ui/Input';
+import { capitalizarDeporte } from '@/features/agenda/formato';
 
 export default function Actividad() {
     const router = useRouter();
@@ -43,7 +44,7 @@ export default function Actividad() {
           try {
             await actualizarPerfil(perfil.id, {
             nivel_actividad: nivel,
-            deporte_principal: deporte || null,
+            deporte_principal: deporte.trim() ? capitalizarDeporte(deporte) : null,
             });
             router.push('/onboarding/objetivo');
         } catch (error) {
@@ -57,8 +58,8 @@ export default function Actividad() {
 
     return (
         <PasoOnboarding
-            paso={3}
-            totalPasos={5}
+            paso={4}
+            totalPasos={6}
             titulo={
                 perfil?.nombre
                     ? `${perfil.nombre}, ¿Cuál es tu nivel de actividad?.`

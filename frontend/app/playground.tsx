@@ -18,7 +18,7 @@ import * as SQLite from 'expo-sqlite';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { cerrarDb, NOMBRE_DB } from '@/db/schema';
 import { reloadAppAsync } from 'expo';
-import NuevoEvento from './evento/nuevo';
+import { sembrarDatosDesarrollo } from '@/db/seeds/devSeed';
 
 
 export default function Prueba() {
@@ -30,8 +30,12 @@ export default function Prueba() {
     router.push('/comida/nueva');
   }
 
-  const NuevoEvento = () => {
-    router.push("./evento/nuevo")
+  // Ruta a proposito inexistente, para ver la pantalla +not-found.
+  // Ojo: no sirve colgarla de /evento/, porque evento/[id] es un segmento
+  // dinamico y se traga cualquier cosa que le pongas ahi.
+  const probar404 = () => {
+    // El cast es obligado: con typed routes, TS solo acepta rutas que existen.
+    router.push('/ruta-que-no-existe' as never);
   }
 
   const resetear = async () => {
@@ -44,6 +48,26 @@ export default function Prueba() {
     await AsyncStorage.clear();
     await reloadAppAsync();
   };
+
+  const [cargandoSeed, setCargandoSeed] = useState(false);
+
+  const cargarSeed = async () => {
+    if (cargandoSeed) return;
+    setCargandoSeed(true);
+    try {
+      await sembrarDatosDesarrollo();
+      Alert.alert(
+        'Seed completado',
+        'Se cargaron los datos de prueba (peso, rutinas, gimnasio, comidas y agenda).',
+      );
+    } catch (e: any) {
+      console.error('Error al cargar seed:', e);
+      Alert.alert('Error', e?.message ?? 'No se pudo cargar el seed.');
+    } finally {
+      setCargandoSeed(false);
+    }
+  };
+
   const [nivel, setNivel] = useState<'sedentario' | 'ligero' | 'moderado' | null>(null);
   return (
     <SafeAreaView style={estilos.safe} edges={['top']}>
@@ -110,8 +134,17 @@ export default function Prueba() {
         <View style={{ height: spacing.sm }} />
         <Boton titulo="Cargando" cargando onPress={() => {}} ancho />
 
+        <Boton titulo="Cargar datos de prueba (Seed)" onPress={cargarSeed} cargando={cargandoSeed} />
+        <View style={{ height: spacing.sm }} />
         <Boton titulo="Resetear todo" onPress={resetear} />
-        <Boton titulo="Nuevo evento" onPress={NuevoEvento} />
+        <View style={{ height: spacing.sm }} />
+        <Boton titulo="Probar 404" onPress={probar404} />
+        <View style={{ height: spacing.sm }} />
+        <Boton
+          titulo="Probar Cartel Pendientes"
+          onPress={() => router.push('/evento/pendientes')}
+          ancho
+        />
         
         
         <Input label="Peso" placeholder="72,5" keyboardType="decimal-pad" style={{ marginBottom: spacing.md }} />

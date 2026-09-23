@@ -2,19 +2,21 @@
 // formulario entero, no solo agrega campos: un evento tiene fecha y hora
 // puntual, una rutina tiene dias de la semana y hora.
 
-import { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert, Switch, Platform, Modal, TextInput } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, Pressable, StyleSheet, Alert, Switch, Platform, Modal, TextInput, ScrollView } from 'react-native';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
-import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
+import { colors, spacing, radius, fontSize, lineHeight, shadow, fontWeight } from '@/ui/theme';
 
 import { crearEvento } from '@/db/queries/eventos';
-import { crearRutina } from '@/db/queries/rutinas';
-import { materializarRutinas } from '@/features/agenda/materializar';
+import { obtenerRutina } from '@/db/queries/rutinas';
+import { programarRutinaSemanal, desactivarRutina } from '@/features/agenda/materializar';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
+import { listarRutinasGimnasio, type RutinaGimnasioConDetalle } from '@/db/queries/rutinasGimnasio';
+import { etiquetaTipo, capitalizarDeporte } from '@/features/agenda/formato';
 import type { TipoEvento, Intensidad } from '@/db/schema';
 import { randomUUID } from '@/db/sync/uuid';
 import { aISOLocal } from '@/lib/fechas';
@@ -29,6 +31,16 @@ const TIPOS: { valor: TipoEvento; label: string }[] = [
   { valor: 'partido', label: 'Partido' },
 ];
 
+const DEPORTES_COMUNES = [
+  'Fútbol',
+  'Pádel',
+  'Tenis',
+  'Básquet',
+  'Running',
+  'Natación',
+  'Vóley',
+];
+
 const INTENSIDADES: { valor: Intensidad; label: string }[] = [
   { valor: 'baja', label: 'Baja' },
   { valor: 'media', label: 'Media' },
@@ -39,6 +51,7 @@ const DURACIONES = [30, 45, 60, 90];
 
 /** Indice = Date.getDay(): 0 domingo, 6 sabado. */
 const DIAS = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+const NOMBRES_DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 const p = (n: number) => String(n).padStart(2, '0');
 
@@ -60,7 +73,7 @@ function horaLocal(d: Date): string {
  * fijaba los segundos en "00" por esto mismo.
  */
 function sinSegundos(d: Date): Date {
-  const copia = new Date(d);
+  const copia = new Date(d.getTime());
   copia.setSeconds(0, 0);
   return copia;
 }
@@ -75,22 +88,134 @@ function fechaLegible(d: Date): string {
 
 export default function NuevoEvento() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    rutinaIds?: string;
+    tipo?: TipoEvento;
+    dias?: string;
+    hora?: string;
+    duracion?: string;
+    intensidad?: Intensidad;
+    deporte?: string;
+  }>();
+  const esEdicion = Boolean(params.rutinaIds);
 
-  const [esRutina, setEsRutina] = useState(false);
-  const [tipo, setTipo] = useState<TipoEvento>('entrenamiento');
-  const [intensidad, setIntensidad] = useState<Intensidad>('media');
-  const [duracion, setDuracion] = useState(60);
+  const [esRutina, setEsRutina] = useState(() => Boolean(params.rutinaIds));
+  const [tipo, setTipo] = useState<TipoEvento>(() => params.tipo ?? 'entrenamiento');
+  const [deportePrincipal, setDeportePrincipal] = useState<string | null>(null);
+  const [deporteSeleccionado, setDeporteSeleccionado] = useState<string>(() => {
+    if (params.deporte) return capitalizarDeporte(params.deporte);
+    return 'Fútbol';
+  });
+  const [esOtroDeporte, setEsOtroDeporte] = useState(() => {
+    if (params.deporte) {
+      const cap = capitalizarDeporte(params.deporte);
+      return !DEPORTES_COMUNES.some((d) => d.toLowerCase() === cap.toLowerCase());
+    }
+    return false;
+  });
+  const [deporteOtroTexto, setDeporteOtroTexto] = useState(() => {
+    if (params.deporte) {
+      const cap = capitalizarDeporte(params.deporte);
+      if (!DEPORTES_COMUNES.some((d) => d.toLowerCase() === cap.toLowerCase())) {
+        return cap;
+      }
+    }
+    return '';
+  });
+  const [rutinasGimnasio, setRutinasGimnasio] = useState<RutinaGimnasioConDetalle[]>([]);
+  const [rutinaGimnasioId, setRutinaGimnasioId] = useState<string | 'sin_rutina' | null>(null);
+  const [rutinasPorDia, setRutinasPorDia] = useState<Record<number, string | 'sin_rutina'>>({});
+  const [modalSelectorRutina, setModalSelectorRutina] = useState<{
+    visible: boolean;
+    diaTarget?: number;
+  } | null>(null);
+  const [intensidad, setIntensidad] = useState<Intensidad>(() => params.intensidad ?? 'media');
+  const [duracion, setDuracion] = useState(() => (params.duracion ? parseInt(params.duracion, 10) : 60));
   const [otraDuracion, setOtraDuracion] = useState(false);
   const [duracionTexto, setDuracionTexto] = useState('');
 
+  const cargarRutinasGim = useCallback(async () => {
+    try {
+      const p = await obtenerPerfilLocal();
+      if (!p) return;
+      const rgs = await listarRutinasGimnasio(p.id, true);
+      setRutinasGimnasio(rgs);
+    } catch (e) {
+      console.error('Error al cargar rutinas de gimnasio:', e);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      cargarRutinasGim();
+    }, [cargarRutinasGim]),
+  );
+
+  useEffect(() => {
+    obtenerPerfilLocal()
+      .then((p) => {
+        if (p?.deporte_principal) {
+          const cap = capitalizarDeporte(p.deporte_principal);
+          setDeportePrincipal(cap);
+          if (!params.deporte) {
+            setDeporteSeleccionado(cap);
+          }
+        }
+      })
+      .catch(console.error);
+  }, [params.deporte]);
+
+  const listaDeportes = (() => {
+    const list: string[] = [];
+    if (deportePrincipal) {
+      list.push(deportePrincipal);
+    }
+    for (const d of DEPORTES_COMUNES) {
+      if (!list.some((existente) => existente.toLowerCase() === d.toLowerCase())) {
+        list.push(d);
+      }
+    }
+    return list;
+  })();
+
   // Evento suelto: un Date completo. Rutina: solo se usa la hora.
-  const [cuando, setCuando] = useState(new Date());
+  const [cuando, setCuando] = useState(() => {
+    const d = new Date();
+    if (params.hora) {
+      const [hh, mm] = params.hora.split(':').map(Number);
+      d.setHours(hh, mm, 0, 0);
+    }
+    return d;
+  });
   const [picker, setPicker] = useState<'date' | 'time' | null>(null);
 
   // Rutina: dias de la semana elegidos, por indice de getDay().
-  const [dias, setDias] = useState<number[]>([]);
+  const [dias, setDias] = useState<number[]>(() => {
+    if (params.dias) {
+      return params.dias.split(',').map(Number).filter((n) => !isNaN(n));
+    }
+    return [];
+  });
 
   const [guardando, setGuardando] = useState(false);
+  // El estado `guardando` llega tarde: dos toques seguidos en Guardar leen los
+  // dos el false del render anterior y guardaban la rutina dos veces. El ref
+  // cambia en el acto.
+  const guardandoRef = useRef(false);
+
+  // Al editar, cada dia arranca con la rutina de gimnasio que ya tenia.
+  useEffect(() => {
+    if (!params.rutinaIds) return;
+    Promise.all(params.rutinaIds.split(',').map((id) => obtenerRutina(id)))
+      .then((filas) => {
+        const previas: Record<number, string | 'sin_rutina'> = {};
+        for (const f of filas) {
+          if (f) previas[f.dia_semana] = f.rutina_gimnasio_id ?? 'sin_rutina';
+        }
+        setRutinasPorDia(previas);
+      })
+      .catch((e) => console.error('Error al cargar las rutinas a editar:', e));
+  }, [params.rutinaIds]);
 
   const alternarDia = (i: number) => {
     setDias((prev) => (prev.includes(i) ? prev.filter((d) => d !== i) : [...prev, i]));
@@ -108,13 +233,33 @@ export default function NuevoEvento() {
   };
 
   const guardar = async () => {
-    if (guardando) return;
+    if (guardandoRef.current) return;
 
     if (esRutina && dias.length === 0) {
       Alert.alert('Faltan días', 'Elegí al menos un día de la semana.');
       return;
     }
 
+    if (tipo === 'gimnasio') {
+      if (!esRutina) {
+        if (!rutinaGimnasioId) {
+          Alert.alert('Falta elegir rutina', 'Elegí una rutina para esta sesión o seleccioná "Sin rutina fija".');
+          return;
+        }
+      } else {
+        for (const dia of dias) {
+          if (!rutinasPorDia[dia]) {
+            Alert.alert(
+              'Falta elegir rutina',
+              `Elegí una rutina para el ${NOMBRES_DIAS[dia]} o seleccioná "Sin rutina fija".`,
+            );
+            return;
+          }
+        }
+      }
+    }
+
+    guardandoRef.current = true;
     setGuardando(true);
     try {
       const perfil = await obtenerPerfilLocal();
@@ -123,22 +268,47 @@ export default function NuevoEvento() {
         return;
       }
 
+      const deporteFinal =
+        tipo === 'entrenamiento'
+          ? esOtroDeporte
+            ? (deporteOtroTexto.trim() || null)
+            : (deporteSeleccionado.trim() || null)
+          : null;
+
       if (esRutina) {
-        // Una rutina por dia elegido: la tabla guarda un dia_semana por fila.
-        for (const dia of dias) {
-          await crearRutina({
-            id: randomUUID(),
-            usuario_id: perfil.id,
-            dia_semana: dia,
-            hora: horaLocal(cuando),
-            tipo,
-            duracion_estimada_min: duracion,
-            intensidad,
-          });
+        // Al editar, desactivar los registros anteriores para limpiar eventos futuros
+        if (esEdicion && params.rutinaIds) {
+          const viejos = params.rutinaIds.split(',');
+          for (const vid of viejos) {
+            await desactivarRutina(vid);
+          }
         }
-        // Sin esto la rutina existe pero la agenda sigue vacia.
-        await materializarRutinas(perfil.id);
+
+        // Una fila por dia elegido, reutilizando la que ya exista para ese dia
+        // y esa rutina. Tambien materializa: sin eso la agenda sigue vacia.
+        await programarRutinaSemanal({
+          usuarioId: perfil.id,
+          tipo,
+          hora: horaLocal(cuando),
+          duracion_estimada_min: duracion,
+          intensidad,
+          deporte: deporteFinal,
+          dias: dias.map((dia) => ({
+            dia_semana: dia,
+            rutina_gimnasio_id:
+              tipo === 'gimnasio' && rutinasPorDia[dia] !== 'sin_rutina'
+                ? rutinasPorDia[dia] ?? null
+                : null,
+          })),
+        });
       } else {
+        const rgId =
+          tipo === 'gimnasio'
+            ? rutinaGimnasioId === 'sin_rutina'
+              ? null
+              : rutinaGimnasioId
+            : null;
+
         await crearEvento({
           id: randomUUID(),
           usuario_id: perfil.id,
@@ -146,6 +316,8 @@ export default function NuevoEvento() {
           fecha_hora_inicio: aISOLocal(sinSegundos(cuando)),
           duracion_estimada_min: duracion,
           intensidad,
+          deporte: deporteFinal,
+          rutina_gimnasio_id: rgId,
         });
       }
 
@@ -154,6 +326,7 @@ export default function NuevoEvento() {
       console.error('Error al guardar:', e);
       Alert.alert('Error', 'No se pudo guardar. Intentá de nuevo.');
     } finally {
+      guardandoRef.current = false;
       setGuardando(false);
     }
   };
@@ -164,7 +337,9 @@ export default function NuevoEvento() {
         <Pressable onPress={() => router.back()} hitSlop={12}>
           <Text style={estilos.cerrar}>✕</Text>
         </Pressable>
-        <Text style={estilos.headerTitulo}>{esRutina ? 'Nueva rutina' : 'Nuevo evento'}</Text>
+        <Text style={estilos.headerTitulo}>
+          {esEdicion ? 'Editar rutina' : esRutina ? 'Nueva rutina' : 'Nuevo evento'}
+        </Text>
       </View>
 
       {/* Tipo */}
@@ -183,19 +358,105 @@ export default function NuevoEvento() {
         ))}
       </View>
 
-      {/* Switch: es el control que mas cambia la pantalla, asi que se resalta
-          cuando esta activo y no solo mueve la perilla. */}
-      <View style={[estilos.switchFila, esRutina && estilos.switchActivo]}>
-        <View style={estilos.flex}>
-          <Text style={estilos.nombre}>Se repite</Text>
-          <Text style={estilos.detalle}>Todas las semanas</Text>
+      {/* Selector de deporte si es entrenamiento */}
+      {tipo === 'entrenamiento' && (
+        <View style={estilos.seccionDeporte}>
+          <Text style={estilos.label}>¿Qué deporte?</Text>
+          <View style={estilos.chips}>
+            {listaDeportes.map((dep) => {
+              const activo =
+                !esOtroDeporte &&
+                deporteSeleccionado.toLowerCase() === dep.toLowerCase();
+              return (
+                <Pressable
+                  key={dep}
+                  style={[estilos.chip, activo && estilos.chipActivo]}
+                  onPress={() => {
+                    setEsOtroDeporte(false);
+                    setDeporteSeleccionado(dep);
+                  }}
+                >
+                  <Text
+                    style={[
+                      estilos.chipTexto,
+                      activo && estilos.chipTextoActivo,
+                    ]}
+                  >
+                    {dep}
+                  </Text>
+                </Pressable>
+              );
+            })}
+            <Pressable
+              style={[estilos.chip, esOtroDeporte && estilos.chipActivo]}
+              onPress={() => setEsOtroDeporte(true)}
+            >
+              <Text
+                style={[
+                  estilos.chipTexto,
+                  esOtroDeporte && estilos.chipTextoActivo,
+                ]}
+              >
+                + Otro
+              </Text>
+            </Pressable>
+          </View>
+
+          {esOtroDeporte && (
+            <View style={estilos.otroDeporteFila}>
+              <TextInput
+                style={estilos.inputOtroDeporte}
+                placeholder="Nombre del deporte (ej: Escalada, Remo...)"
+                placeholderTextColor={colors.textMuted}
+                value={deporteOtroTexto}
+                onChangeText={setDeporteOtroTexto}
+                autoFocus
+              />
+            </View>
+          )}
         </View>
-        <Switch
-          value={esRutina}
-          onValueChange={setEsRutina}
-          trackColor={{ true: colors.action }}
-        />
-      </View>
+      )}
+
+      {/* Selector de rutina para gimnasio puntual */}
+      {tipo === 'gimnasio' && !esRutina && (
+        <View style={estilos.seccionGimnasio}>
+          <Text style={estilos.label}>¿Qué rutina vas a hacer?</Text>
+          <Pressable
+            style={estilos.selectorRutinaBoton}
+            onPress={() => setModalSelectorRutina({ visible: true })}
+          >
+            <Text
+              style={[
+                estilos.selectorRutinaTexto,
+                !rutinaGimnasioId && estilos.selectorRutinaTextoPlaceholder,
+              ]}
+              numberOfLines={1}
+            >
+              {rutinaGimnasioId === 'sin_rutina'
+                ? 'Sin rutina fija (Gimnasio libre)'
+                : rutinaGimnasioId
+                ? rutinasGimnasio.find((r) => r.id === rutinaGimnasioId)?.nombre ?? 'Rutina seleccionada'
+                : 'Elegir rutina o sesión libre ▾'}
+            </Text>
+            <Text style={estilos.selectorRutinaFlecha}>▾</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {/* Switch: solo visible al crear; al editar una rutina fija siempre se repite */}
+      {!esEdicion && (
+        <View style={[estilos.switchFila, esRutina && estilos.switchActivo]}>
+          <View style={estilos.flex}>
+            <Text style={estilos.nombre}>Se repite</Text>
+            <Text style={estilos.detalle}>Todas las semanas</Text>
+          </View>
+          <Switch
+            value={esRutina}
+            onValueChange={setEsRutina}
+            trackColor={{ true: colors.action }}
+          />
+        </View>
+      )}
 
       {/* Cuando: cambia de forma segun el modo. */}
       {esRutina ? (
@@ -214,6 +475,59 @@ export default function NuevoEvento() {
               </Pressable>
             ))}
           </View>
+
+          {/* Rutina por dia para gimnasio semanal repetido */}
+          {tipo === 'gimnasio' && (
+            <View style={estilos.seccionGimnasio}>
+              <Text style={estilos.label}>Rutina por día</Text>
+              {dias.length === 0 ? (
+                <Text style={estilos.textoAyudaGimnasio}>
+                  Elegí arriba los días de la semana para asignar su rutina.
+                </Text>
+              ) : (
+                <View style={estilos.listaDiasGimnasio}>
+                  {dias.map((dia) => {
+                    const sel = rutinasPorDia[dia];
+                    const nombreSel =
+                      sel === 'sin_rutina'
+                        ? 'Sin rutina fija'
+                        : sel
+                        ? rutinasGimnasio.find((r) => r.id === sel)?.nombre ?? 'Rutina elegida'
+                        : 'Elegir rutina ▾';
+
+                    return (
+                      <View key={dia} style={estilos.filaDiaGimnasio}>
+                        <Text style={estilos.nombreDiaGimnasio}>{NOMBRES_DIAS[dia]}</Text>
+                        <Pressable
+                          style={[
+                            estilos.pillRutinaDia,
+                            !sel && estilos.pillRutinaDiaIncompleto,
+                          ]}
+                          onPress={() => setModalSelectorRutina({ visible: true, diaTarget: dia })}
+                        >
+                          <Text
+                            style={[
+                              estilos.pillRutinaDiaTexto,
+                              !sel && estilos.pillRutinaDiaTextoPlaceholder,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {nombreSel}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+              <Pressable
+                style={estilos.botonCrearRutinaInline}
+                onPress={() => router.push('/rutina-gimnasio/nueva')}
+              >
+                <Text style={estilos.botonCrearRutinaInlineTexto}>+ Crear nueva rutina de gimnasio</Text>
+              </Pressable>
+            </View>
+          )}
 
           <Text style={estilos.label}>A qué hora</Text>
           <Pressable style={estilos.campo} onPress={() => setPicker('time')}>
@@ -312,7 +626,7 @@ export default function NuevoEvento() {
       )}
 
       <Boton
-        titulo={esRutina ? 'Crear rutina' : 'Guardar'}
+        titulo={esEdicion ? 'Guardar cambios' : esRutina ? 'Crear rutina' : 'Guardar'}
         onPress={guardar}
         cargando={guardando}
       />
@@ -347,6 +661,146 @@ export default function NuevoEvento() {
             </View>
           </View>
         </View>
+      </Modal>
+
+      {/* Modal selector de rutina de gimnasio */}
+      <Modal
+        visible={Boolean(modalSelectorRutina?.visible)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalSelectorRutina(null)}
+      >
+        <Pressable
+          style={estilos.fondo}
+          onPress={() => setModalSelectorRutina(null)}
+        >
+          <Pressable style={estilos.sheetModalRutina} onPress={(e) => e.stopPropagation()}>
+            <View style={estilos.modalSheetHeader}>
+              <Text style={estilos.modalSheetTitulo}>
+                {modalSelectorRutina?.diaTarget !== undefined
+                  ? `Rutina para ${NOMBRES_DIAS[modalSelectorRutina.diaTarget]}`
+                  : 'Elegir rutina de gimnasio'}
+              </Text>
+              <Pressable
+                onPress={() => setModalSelectorRutina(null)}
+                hitSlop={12}
+              >
+                <Text style={estilos.cerrar}>✕</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView style={estilos.modalListaOpciones} bounces={false}>
+              {rutinasGimnasio.length > 0 && (
+                <View style={estilos.modalSeccion}>
+                  <Text style={estilos.modalSeccionLabel}>Tus rutinas guardadas</Text>
+                  {rutinasGimnasio.map((rg) => {
+                    const esSeleccionada =
+                      modalSelectorRutina?.diaTarget !== undefined
+                        ? rutinasPorDia[modalSelectorRutina.diaTarget] === rg.id
+                        : rutinaGimnasioId === rg.id;
+
+                    return (
+                      <Pressable
+                        key={rg.id}
+                        style={[
+                          estilos.modalOpcionCard,
+                          esSeleccionada && estilos.modalOpcionCardActiva,
+                        ]}
+                        onPress={() => {
+                          if (modalSelectorRutina?.diaTarget !== undefined) {
+                            setRutinasPorDia((prev) => ({
+                              ...prev,
+                              [modalSelectorRutina.diaTarget!]: rg.id,
+                            }));
+                          } else {
+                            setRutinaGimnasioId(rg.id);
+                          }
+                          setModalSelectorRutina(null);
+                        }}
+                      >
+                        <View style={estilos.flex}>
+                          <Text
+                            style={[
+                              estilos.modalOpcionTitulo,
+                              esSeleccionada && estilos.modalOpcionTituloActivo,
+                            ]}
+                          >
+                            {rg.nombre}
+                          </Text>
+                          <Text style={estilos.modalOpcionSubtitulo}>
+                            {rg.ejercicios.length} ejercicios
+                          </Text>
+                        </View>
+                        {esSeleccionada && (
+                          <Text style={estilos.modalCheck}>✓</Text>
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+
+              <View style={estilos.modalSeccion}>
+                <Text style={estilos.modalSeccionLabel}>Sesión libre</Text>
+                {(() => {
+                  const esLibreSeleccionada =
+                    modalSelectorRutina?.diaTarget !== undefined
+                      ? rutinasPorDia[modalSelectorRutina.diaTarget] === 'sin_rutina'
+                      : rutinaGimnasioId === 'sin_rutina';
+
+                  return (
+                    <Pressable
+                      style={[
+                        estilos.modalOpcionCard,
+                        esLibreSeleccionada && estilos.modalOpcionCardActiva,
+                      ]}
+                      onPress={() => {
+                        if (modalSelectorRutina?.diaTarget !== undefined) {
+                          setRutinasPorDia((prev) => ({
+                            ...prev,
+                            [modalSelectorRutina.diaTarget!]: 'sin_rutina',
+                          }));
+                        } else {
+                          setRutinaGimnasioId('sin_rutina');
+                        }
+                        setModalSelectorRutina(null);
+                      }}
+                    >
+                      <View style={estilos.flex}>
+                        <Text
+                          style={[
+                            estilos.modalOpcionTitulo,
+                            esLibreSeleccionada && estilos.modalOpcionTituloActivo,
+                          ]}
+                        >
+                          Sin rutina fija
+                        </Text>
+                        <Text style={estilos.modalOpcionSubtitulo}>
+                          Gimnasio libre, sin ejercicios predefinidos
+                        </Text>
+                      </View>
+                      {esLibreSeleccionada && (
+                        <Text style={estilos.modalCheck}>✓</Text>
+                      )}
+                    </Pressable>
+                  );
+                })()}
+              </View>
+            </ScrollView>
+
+            <View style={estilos.modalFooter}>
+              <Pressable
+                style={estilos.modalBotonCrear}
+                onPress={() => {
+                  setModalSelectorRutina(null);
+                  router.push('/rutina-gimnasio/nueva');
+                }}
+              >
+                <Text style={estilos.modalBotonCrearTexto}>+ Crear nueva rutina de gimnasio</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </Pantalla>
   );
@@ -464,5 +918,183 @@ const estilos = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.action,
     justifyContent: 'center',
+  },
+  seccionDeporte: {
+    gap: spacing.xs,
+  },
+  otroDeporteFila: {
+    marginTop: spacing.xs,
+  },
+  inputOtroDeporte: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    fontSize: fontSize.body,
+    color: colors.textPrimary,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  seccionGimnasio: {
+    gap: spacing.xs,
+  },
+  selectorRutinaBoton: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  selectorRutinaTexto: {
+    fontSize: fontSize.body,
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  selectorRutinaTextoPlaceholder: {
+    color: colors.textMuted,
+  },
+  selectorRutinaFlecha: {
+    fontSize: fontSize.body,
+    color: colors.textSecondary,
+    marginLeft: spacing.sm,
+  },
+  textoAyudaGimnasio: {
+    fontSize: fontSize.small,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+  },
+  listaDiasGimnasio: {
+    gap: spacing.xs,
+  },
+  filaDiaGimnasio: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surface,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  nombreDiaGimnasio: {
+    fontSize: fontSize.body,
+    color: colors.textPrimary,
+    fontWeight: fontWeight.bold,
+  },
+  pillRutinaDia: {
+    backgroundColor: colors.bg,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm + 2,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.action,
+    maxWidth: '65%',
+  },
+  pillRutinaDiaIncompleto: {
+    borderColor: colors.border,
+  },
+  pillRutinaDiaTexto: {
+    fontSize: fontSize.small,
+    color: colors.action,
+    fontWeight: fontWeight.medium,
+  },
+  pillRutinaDiaTextoPlaceholder: {
+    color: colors.textMuted,
+    fontWeight: fontWeight.regular,
+  },
+  botonCrearRutinaInline: {
+    paddingVertical: spacing.xs,
+    alignItems: 'flex-start',
+  },
+  botonCrearRutinaInlineTexto: {
+    fontSize: fontSize.small,
+    color: colors.action,
+    fontWeight: fontWeight.medium,
+  },
+  sheetModalRutina: {
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    padding: spacing.lg,
+    maxHeight: '80%',
+    ...shadow.sheet,
+  },
+  modalSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  modalSheetTitulo: {
+    fontSize: fontSize.title,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  modalListaOpciones: {
+    marginBottom: spacing.md,
+  },
+  modalSeccion: {
+    marginBottom: spacing.md,
+  },
+  modalSeccionLabel: {
+    fontSize: fontSize.caption,
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    marginBottom: spacing.xs,
+  },
+  modalOpcionCard: {
+    backgroundColor: colors.surface,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  modalOpcionCardActiva: {
+    borderColor: colors.action,
+  },
+  modalOpcionTitulo: {
+    fontSize: fontSize.body,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  modalOpcionTituloActivo: {
+    color: colors.action,
+  },
+  modalOpcionSubtitulo: {
+    fontSize: fontSize.caption,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  modalCheck: {
+    fontSize: fontSize.body,
+    color: colors.action,
+    fontWeight: fontWeight.bold,
+    marginLeft: spacing.sm,
+  },
+  modalFooter: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.md,
+  },
+  modalBotonCrear: {
+    backgroundColor: colors.surface,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.action,
+  },
+  modalBotonCrearTexto: {
+    fontSize: fontSize.body,
+    color: colors.action,
+    fontWeight: fontWeight.medium,
   },
 });

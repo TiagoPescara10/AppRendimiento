@@ -8,6 +8,7 @@ import { useRouter } from 'expo-router';
 import type { Objetivo as TipoObjetivo } from '@/db/schema';
 import { actualizarPerfil } from '@/db/queries/perfil';
 import { Input } from '@/ui/Input';
+import { validarObjetivo } from '@/lib/validacion';
 
 
 export default function Objetivo() {
@@ -73,29 +74,16 @@ export default function Objetivo() {
       return;
     }
 
-    if (requierePesoObjetivo) {
-        if (!Number.isFinite(objetivoKg)) {
-            Alert.alert('Falta el peso objetivo', 'Ingresá el peso al que querés llegar.');
-            return;
-        }
-        if (!perfil.altura_cm) {
-            Alert.alert('Falta la altura', 'Volvé al primer paso y completá tu altura.');
-            return;
-        }
-        if (imc < 18.5) {
-            Alert.alert('Objetivo no saludable', 'Ese peso queda por debajo del rango saludable para tu altura.');
-            return;
-        }
-        if (ultimoPesoValue !== null) {
-            if (objetivo === 'bajar' && objetivoKg >= ultimoPesoValue) {
-                Alert.alert('Revisá el objetivo', `Elegiste bajar de peso, pero el objetivo es mayor o igual a tu peso actual (${ultimoPesoValue} kg).`);
-                return;
-            }
-            if (objetivo === 'subir' && objetivoKg <= ultimoPesoValue) {
-                Alert.alert('Revisá el objetivo', `Elegiste subir de peso, pero el objetivo es menor o igual a tu peso actual (${ultimoPesoValue} kg).`);
-                return;
-            }
-            }
+    const val = validarObjetivo({
+      objetivo,
+      pesoObjetivoKg: requierePesoObjetivo ? objetivoKg : null,
+      alturaCm: perfil.altura_cm,
+      pesoActualKg: ultimoPesoValue,
+    });
+
+    if (!val.ok) {
+      Alert.alert(val.titulo, val.mensaje);
+      return;
     }
 
     guardandoRef.current = true;
@@ -121,8 +109,8 @@ export default function Objetivo() {
 
   return (
     <PasoOnboarding
-      paso={4}
-      totalPasos={5}
+      paso={5}
+      totalPasos={6}
         titulo={
             perfil?.nombre
                 ? `${perfil.nombre}, ¿Cuál es tu objetivo?`

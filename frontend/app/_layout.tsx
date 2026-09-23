@@ -13,10 +13,14 @@ type Destino = 'onboarding' | 'muro' | 'app';
 
 // Rutas donde el usuario puede estar legitimamente en cada estado.
 // El guard solo redirige si esta FUERA de estas.
+//
+// '+not-found' esta en los tres: una ruta inexistente hay que MOSTRARLA como
+// tal, sin importar en que estado este el usuario. Si el guard la corrige
+// sola, la pantalla de 404 parpadea y el link roto nunca se reporta.
 const PERMITIDO: Record<Destino, string[]> = {
-  onboarding: ['onboarding'],
-  muro: ['onboarding', '(auth)'],
-  app: ['(tabs)', 'playground', 'comida', 'evento'],
+  onboarding: ['onboarding', '+not-found'],
+  muro: ['onboarding', '(auth)', '+not-found'],
+  app: ['(tabs)', 'playground', 'comida', 'evento', 'perfil', 'rutina-gimnasio', 'agenda', 'entrenamiento', '+not-found'],
 };
 
 export default function RootLayout() {
@@ -32,14 +36,15 @@ export default function RootLayout() {
     const sesion = await obtenerSesion();
 
     // El onboarding esta completo cuando estan los campos que necesita
-    // el calculo. Son nullables en el schema justamente porque se van
-    // guardando de a un paso.
+    // el calculo segun el modo de nutricion elegido.
     const perfilCompleto =
-      !!perfil?.altura_cm &&
-      !!perfil?.fecha_nacimiento &&
-      !!perfil?.sexo_biologico &&
-      !!perfil?.nivel_actividad &&
-      !!perfil?.objetivo;
+      perfil?.modo_nutricion === 'recuento'
+        ? !!perfil?.nombre && !!perfil?.altura_cm
+        : !!perfil?.altura_cm &&
+          !!perfil?.fecha_nacimiento &&
+          !!perfil?.sexo_biologico &&
+          !!perfil?.nivel_actividad &&
+          !!perfil?.objetivo;
 
     if (!perfilCompleto) return 'onboarding' as const;
     if (!sesion) return 'muro' as const;
@@ -84,7 +89,7 @@ export default function RootLayout() {
       const grupo = segments[0];
       if (PERMITIDO[nuevo].includes(grupo)) return;
 
-      if (nuevo === 'onboarding') router.replace('/onboarding/datos');
+      if (nuevo === 'onboarding') router.replace('/onboarding/modo');
       else if (nuevo === 'muro') router.replace('/onboarding/resumen');
       else router.replace('/(tabs)');
     })();

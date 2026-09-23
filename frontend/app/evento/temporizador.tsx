@@ -15,7 +15,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { View, Text, Pressable, StyleSheet, Alert, AppState } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 import { Pantalla } from '@/ui/Pantalla';
@@ -31,6 +31,7 @@ import { FilaNumero } from '@/features/entrenamiento/components/FilaNumero';
 import { Anillo } from '@/features/entrenamiento/components/Anillo';
 import { VistaPrevia } from '@/features/entrenamiento/components/VistaPrevia';
 import {
+  CONFIG_CRONOMETRO,
   CONFIG_POR_DEFECTO,
   ETIQUETA_FASE,
   PRESETS,
@@ -98,8 +99,14 @@ const FONDO_FASE: Record<TipoFase, string> = {
 
 export default function Temporizador() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ modo?: string }>();
 
-  const [config, setConfig] = useState<ConfigTemporizador>(CONFIG_POR_DEFECTO);
+  const [config, setConfig] = useState<ConfigTemporizador>(() => {
+    if (params.modo === 'cronometro') {
+      return CONFIG_CRONOMETRO;
+    }
+    return CONFIG_POR_DEFECTO;
+  });
   const [plan, setPlan] = useState<Fase[]>([]);
   // null = todavia esta configurando. Es el unico interruptor entre los dos
   // estados de la pantalla.
@@ -422,7 +429,7 @@ export default function Temporizador() {
             El cronometro no tiene ni bloques ni final, asi que no dibuja nada
             en vez de dejar una fila vacia ocupando alto. */}
         <View style={estilos.contexto}>
-          {(config.bloques > 1 || restanteTotal !== null) && (
+          {!cronometro && (config.bloques > 1 || restanteTotal !== null) && (
             <View style={estilos.contextoFila}>
               {config.bloques > 1 && (
                 <Text style={estilos.contextoTexto}>
@@ -440,7 +447,7 @@ export default function Temporizador() {
             </View>
           )}
 
-          {tramos.length > 1 && (
+          {!cronometro && tramos.length > 1 && (
             <View style={estilos.segmentos}>
               {tramos.map((t) => {
                 // Llenado real y no "medio lleno": el segmento del bloque en
@@ -468,7 +475,7 @@ export default function Temporizador() {
 
           <Anillo numero={numero} fraccion={fraccion} />
 
-          {config.pasadas > 1 && (
+          {!cronometro && config.pasadas > 1 && (
             <>
               <Text style={estilos.progreso}>
                 Pasada {fase.pasada} de {config.pasadas}
@@ -575,7 +582,7 @@ export default function Temporizador() {
               setConfig((c) =>
                 esCronometro(c)
                   ? { ...c, trabajoSeg: CONFIG_POR_DEFECTO.trabajoSeg }
-                  : { ...c, trabajoSeg: 0 },
+                  : CONFIG_CRONOMETRO,
               ),
           }}
         />

@@ -20,7 +20,7 @@ import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/them
 
 import { listarEventosPorFecha, marcarCompletado, eliminarEvento } from '@/db/queries/eventos';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
-import { ETIQUETA_TIPO, ETIQUETA_INTENSIDAD, horaDe, partesFecha } from '@/features/agenda/formato';
+import { etiquetaTipo, ETIQUETA_INTENSIDAD, horaDe, partesFecha } from '@/features/agenda/formato';
 import type { EventoRow } from '@/db/schema';
 
 // ---------------------------------------------------------------------------
@@ -32,6 +32,7 @@ export default function DiaAgenda() {
   const { fecha } = useLocalSearchParams<{ fecha: string }>();
 
   const [eventos, setEventos] = useState<EventoRow[]>([]);
+  const [deporte, setDeporte] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
 
   const cargar = useCallback(async () => {
@@ -39,6 +40,7 @@ export default function DiaAgenda() {
     try {
       const perfil = await obtenerPerfilLocal();
       if (!perfil) return;
+      setDeporte(perfil.deporte_principal);
       setEventos(await listarEventosPorFecha(perfil.id, fecha));
     } catch (e) {
       console.error('Error al cargar el día:', e);
@@ -123,7 +125,13 @@ export default function DiaAgenda() {
           <View key={e.id} style={estilos.card}>
             <View style={estilos.cardHeader}>
               <View style={estilos.flex}>
-                <Text style={estilos.nombre}>{ETIQUETA_TIPO[e.tipo]}</Text>
+                <Text style={estilos.nombre}>
+                  {etiquetaTipo(e.tipo, deporte, {
+                    rutinaId: e.rutina_id,
+                    modoEntrenamiento: e.modo_entrenamiento,
+                    deporte: e.deporte,
+                  })}
+                </Text>
                 <Text style={estilos.detalle}>
                   {horaDe(e.fecha_hora_inicio)}
                   {e.duracion_estimada_min ? ` · ${e.duracion_estimada_min} min` : ''}

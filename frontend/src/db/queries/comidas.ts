@@ -200,6 +200,50 @@ export async function listarItemsConAlimento(
   );
 }
 
+/** Un item con la fecha de su comida. Lo que necesita un promedio por periodo. */
+export interface ItemComidaConFecha extends ItemComidaConAlimento {
+  /** 'YYYY-MM-DD' local: la columna generada de `comida`. */
+  fecha: string;
+}
+
+/**
+ * Todos los items de un rango de dias, con su alimento y con la fecha de la
+ * comida a la que pertenecen.
+ *
+ * Existe para la pantalla de Progreso y no reusa listarItemsConAlimento() a
+ * proposito: esa es por comida, y un promedio de noventa dias saldria a
+ * doscientas queries. Esta es una sola.
+ *
+ * `desde` y `hasta` son 'YYYY-MM-DD' inclusive, y se comparan contra la
+ * columna generada `fecha`, que ya es el dia LOCAL. Comparar contra
+ * `fecha_hora` obligaria a armar un ISO con offset y saldria mal en cuanto
+ * haya dos offsets distintos en la serie.
+ */
+export async function listarItemsConAlimentoPorRango(
+  usuarioId: string,
+  desde: string,
+  hasta: string,
+): Promise<ItemComidaConFecha[]> {
+  return getDb().getAllAsync<ItemComidaConFecha>(
+    `SELECT
+       i.*,
+       c.fecha           AS fecha,
+       a.nombre          AS alimento_nombre,
+       a.marca           AS alimento_marca,
+       a.kcal_por_100g   AS kcal_por_100g,
+       a.proteina_g      AS proteina_g,
+       a.carbohidratos_g AS carbohidratos_g,
+       a.grasa_g         AS grasa_g,
+       a.fibra_g         AS fibra_g
+     FROM item_comida i
+     JOIN comida c   ON c.id = i.comida_id
+     JOIN alimento a ON a.id = i.alimento_id
+     WHERE c.usuario_id = ? AND c.fecha BETWEEN ? AND ?
+     ORDER BY c.fecha ASC, i.created_at ASC`,
+    [usuarioId, desde, hasta],
+  );
+}
+
 export async function actualizarItem(
   id: string,
   cambios: { cantidad_g?: number; editado_por_usuario?: boolean },

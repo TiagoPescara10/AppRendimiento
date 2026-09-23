@@ -59,7 +59,11 @@ export default function Peso() {
             });
         }
 
-        router.push('/onboarding/actividad');
+        if (perfil.modo_nutricion === 'recuento') {
+          router.push('/onboarding/resumen');
+        } else {
+          router.push('/onboarding/actividad');
+        }
         } catch (error) {
         console.error('Error al guardar el peso:', error);
         Alert.alert('Error', 'No se pudo guardar el peso. Por favor, intentá nuevamente.');
@@ -69,10 +73,12 @@ export default function Peso() {
         }
     }
 
+    const totalPasos = perfil?.modo_nutricion === 'recuento' ? 4 : 6;
+
     return (
         <PasoOnboarding
-            paso={2}
-            totalPasos={5}
+            paso={3}
+            totalPasos={totalPasos}
             titulo={
                 perfil?.nombre
                     ? `Hola ${perfil.nombre}, ¿cuál es tu peso actual?`

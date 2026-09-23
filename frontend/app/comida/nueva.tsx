@@ -3,17 +3,18 @@
 // escribe en la base hasta que tocas "Guardar comida".
 
 import { useState, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert, Modal } from 'react-native';
-import { useRouter } from 'expo-router';
+import { View, Text, Pressable, StyleSheet, Alert, Modal, TextInput } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Input } from '@/ui/Input';
 import { Boton } from '@/ui/Boton';
 import { SheetPorciones } from '@/features/comidas/components/SheetPorciones';
 import type { DatosSheet } from '@/features/comidas/components/SheetPorciones';
+import { esProbableBebida, obtenerPorcionesBebidaEstandar } from '@/features/comidas/porciones';
 import { colors, spacing, radius, fontSize, fontWeight, lineHeight, shadow, sizes } from '@/ui/theme';
 
-import { buscarAlimentosPorNombre } from '@/db/queries/alimentos';
+import { buscarAlimentosPorNombre, guardarAlimento } from '@/db/queries/alimentos';
 import type { Alimento } from '@/db/queries/alimentos';
 import { crearComida, agregarItem } from '@/db/queries/comidas';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
@@ -54,13 +55,34 @@ function capitalizar(texto: string): string {
 
 export default function NuevaComida() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ busqueda?: string; codigo?: string; marca?: string }>();
 
   const [tipo, setTipo] = useState<TipoComida>(tipoPorHora);
   const [selectorAbierto, setSelectorAbierto] = useState(false);
-  const [busqueda, setBusqueda] = useState('');
+  const [busqueda, setBusqueda] = useState(params.busqueda ?? '');
   const [resultados, setResultados] = useState<Alimento[]>([]);
   const [items, setItems] = useState<ItemPendiente[]>([]);
   const [guardando, setGuardando] = useState(false);
+
+  // Modal para dar de alta alimento manual si no esta en catalogo
+  const [modalAltaManual, setModalAltaManual] = useState(false);
+  const [altaNombre, setAltaNombre] = useState(params.busqueda ?? '');
+  const [altaMarca, setAltaMarca] = useState(params.marca ?? '');
+  const [altaKcal, setAltaKcal] = useState('');
+  const [altaProt, setAltaProt] = useState('');
+  const [altaCarb, setAltaCarb] = useState('');
+  const [altaGrasa, setAltaGrasa] = useState('');
+
+  // Actualizar si cambian los params de navegacion
+  useEffect(() => {
+    if (params.busqueda) {
+      setBusqueda(params.busqueda);
+      setAltaNombre(params.busqueda);
+    }
+    if (params.marca) {
+      setAltaMarca(params.marca);
+    }
+  }, [params.busqueda, params.marca]);
 
   // El sheet sirve para agregar (indice null) o editar (indice = posicion).
   const [sheet, setSheet] = useState<{ alimento: Alimento; indice: number | null } | null>(null);
@@ -155,6 +177,50 @@ export default function NuevaComida() {
     }
   };
 
+  const guardarNuevoAlimentoManual = async () => {
+    const nombreLimpio = altaNombre.trim();
+    const kcal = parseFloat(altaKcal.replace(',', '.'));
+    if (!nombreLimpio) {
+      Alert.alert('Falta nombre', 'Ingresá el nombre del alimento.');
+      return;
+    }
+    if (!Number.isFinite(kcal) || kcal < 0) {
+      Alert.alert('Kcal inválidas', 'Ingresá las calorías cada 100 gramos.');
+      return;
+    }
+
+    const prot = parseFloat(altaProt.replace(',', '.')) || 0;
+    const carb = parseFloat(altaCarb.replace(',', '.')) || 0;
+    const grasa = parseFloat(altaGrasa.replace(',', '.')) || 0;
+
+    try {
+      const esBebida = esProbableBebida(nombreLimpio);
+      const porciones = esBebida ? obtenerPorcionesBebidaEstandar() : [];
+
+      const nuevo = await guardarAlimento({
+        id: randomUUID(),
+        nombre: nombreLimpio,
+        marca: altaMarca.trim() || null,
+        codigo_barras: params.codigo || null,
+        kcal_por_100g: Math.round(kcal),
+        proteina_g: prot,
+        carbohidratos_g: carb,
+        grasa_g: grasa,
+        fuente: 'manual',
+        verificado: false,
+        porciones,
+        categoria: esBebida ? 'bebidas' : 'otros',
+      });
+
+      setModalAltaManual(false);
+      setSheet({ alimento: nuevo, indice: null });
+      setBusqueda('');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al guardar alimento';
+      Alert.alert('Error', msg);
+    }
+  };
+
   const buscando = busqueda.trim().length > 0;
 
   // Traduccion del estado local al contrato del sheet compartido.
@@ -162,6 +228,7 @@ export default function NuevaComida() {
     nombre: sheet.alimento.nombre,
     kcal_por_100g: sheet.alimento.kcal_por_100g,
     porciones: sheet.alimento.porciones,
+    categoria: sheet.alimento.categoria,
     cantidadActual: sheet.indice != null ? items[sheet.indice]?.cantidad_g : undefined,
     onQuitar: sheet.indice != null ? quitarItem : undefined,
   };
@@ -197,7 +264,7 @@ export default function NuevaComida() {
         </Pressable>
         <Pressable
           style={estilos.accionChica}
-          onPress={() => Alert.alert('Próximamente', 'El escáner todavía no está listo.')}
+          onPress={() => router.push('/comida/escanear')}
         >
           <Text style={estilos.accionIcono}>▥</Text>
         </Pressable>
@@ -229,7 +296,17 @@ export default function NuevaComida() {
           {resultados.length === 0 && (
             <View style={estilos.vacio}>
               <Text style={estilos.detalle}>No encontramos nada con ese nombre.</Text>
-              <Text style={estilos.detalle}>Probá con otro nombre o cargalo a mano.</Text>
+              <Pressable
+                style={estilos.botonCargarManual}
+                onPress={() => {
+                  setAltaNombre(busqueda);
+                  setModalAltaManual(true);
+                }}
+              >
+                <Text style={estilos.botonCargarManualTexto}>
+                  + Cargar "{busqueda}" a mano
+                </Text>
+              </Pressable>
             </View>
           )}
         </View>
@@ -334,6 +411,104 @@ export default function NuevaComida() {
                 <Text style={estilos.nombre}>{capitalizar(t)}</Text>
               </Pressable>
             ))}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de alta de alimento a mano */}
+      <Modal
+        visible={modalAltaManual}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalAltaManual(false)}
+      >
+        <View style={estilos.fondo}>
+          <Pressable style={estilos.flex} onPress={() => setModalAltaManual(false)} />
+          <View style={estilos.sheetAlta}>
+            <View style={estilos.agarre} />
+            <Text style={estilos.sheetTitulo}>Cargar alimento a mano</Text>
+            <Text style={estilos.sheetSubtitulo}>Completá los datos de la tabla nutricional por 100 g:</Text>
+
+            <View style={estilos.formFila}>
+              <Text style={estilos.labelForm}>Nombre *</Text>
+              <TextInput
+                style={estilos.inputForm}
+                value={altaNombre}
+                onChangeText={setAltaNombre}
+                placeholder="Ej: Yogur Natural"
+                placeholderTextColor={colors.textMuted}
+              />
+            </View>
+
+            <View style={estilos.formFila}>
+              <Text style={estilos.labelForm}>Marca (opcional)</Text>
+              <TextInput
+                style={estilos.inputForm}
+                value={altaMarca}
+                onChangeText={setAltaMarca}
+                placeholder="Ej: La Serenísima"
+                placeholderTextColor={colors.textMuted}
+              />
+            </View>
+
+            <View style={estilos.macrosFilaGrid}>
+              <View style={estilos.macroColInput}>
+                <Text style={estilos.labelForm}>Kcal *</Text>
+                <TextInput
+                  style={estilos.inputForm}
+                  keyboardType="numeric"
+                  value={altaKcal}
+                  onChangeText={setAltaKcal}
+                  placeholder="0"
+                  placeholderTextColor={colors.textMuted}
+                />
+              </View>
+              <View style={estilos.macroColInput}>
+                <Text style={estilos.labelForm}>Prot (g)</Text>
+                <TextInput
+                  style={estilos.inputForm}
+                  keyboardType="numeric"
+                  value={altaProt}
+                  onChangeText={setAltaProt}
+                  placeholder="0"
+                  placeholderTextColor={colors.textMuted}
+                />
+              </View>
+              <View style={estilos.macroColInput}>
+                <Text style={estilos.labelForm}>Carb (g)</Text>
+                <TextInput
+                  style={estilos.inputForm}
+                  keyboardType="numeric"
+                  value={altaCarb}
+                  onChangeText={setAltaCarb}
+                  placeholder="0"
+                  placeholderTextColor={colors.textMuted}
+                />
+              </View>
+              <View style={estilos.macroColInput}>
+                <Text style={estilos.labelForm}>Grasa (g)</Text>
+                <TextInput
+                  style={estilos.inputForm}
+                  keyboardType="numeric"
+                  value={altaGrasa}
+                  onChangeText={setAltaGrasa}
+                  placeholder="0"
+                  placeholderTextColor={colors.textMuted}
+                />
+              </View>
+            </View>
+
+            <View style={estilos.modalBotonesFila}>
+              <Boton
+                titulo="Cancelar"
+                variante="secundario"
+                onPress={() => setModalAltaManual(false)}
+              />
+              <Boton
+                titulo="Guardar y usar"
+                onPress={guardarNuevoAlimentoManual}
+              />
+            </View>
           </View>
         </View>
       </Modal>
@@ -513,4 +688,68 @@ const estilos = StyleSheet.create({
     ...shadow.card,
   },
   opcionActiva: { borderWidth: 1.5, borderColor: colors.action },
+
+  botonCargarManual: {
+    marginTop: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignSelf: 'center',
+  },
+  botonCargarManualTexto: {
+    color: colors.action,
+    fontSize: fontSize.small,
+    fontWeight: fontWeight.bold,
+  },
+
+  sheetAlta: {
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxxl,
+    ...shadow.sheet,
+    gap: spacing.sm,
+  },
+  sheetSubtitulo: {
+    fontSize: fontSize.caption,
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  formFila: {
+    gap: 4,
+  },
+  labelForm: {
+    fontSize: fontSize.caption,
+    fontWeight: fontWeight.bold,
+    color: colors.textSecondary,
+  },
+  inputForm: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    height: sizes.controlSmall,
+    fontSize: fontSize.small,
+    color: colors.textPrimary,
+  },
+  macrosFilaGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  macroColInput: {
+    flex: 1,
+    gap: 4,
+  },
+  modalBotonesFila: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
 });

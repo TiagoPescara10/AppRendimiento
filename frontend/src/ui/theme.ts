@@ -60,6 +60,10 @@ const palette = {
   emerald400: '#5DCAA5',
   amber500: '#EF9F27',
 
+  // avatar mascota
+  leonFondo: '#1E2D4A',
+  leonBorde: '#D9A86C',
+
   green600: '#16A34A',
   green700: '#15803D',
   amber600: '#D97706',
@@ -156,6 +160,24 @@ export const colors = {
 
   // overlay de los modales. Tintado calido por lo mismo que las sombras.
   overlay: 'rgba(50, 40, 20, 0.5)',
+
+  // escaner y camara
+  camaraFondo: palette.navy900,
+  scannerHud: palette.amber100,
+  scannerHudMuted: 'rgba(255, 240, 201, 0.4)',
+  controlOnCamara: 'rgba(255, 255, 255, 0.2)',
+  controlOnCamaraPressed: 'rgba(255, 255, 255, 0.35)',
+  bordeOnCamara: 'rgba(255, 255, 255, 0.25)',
+
+  // mascota leon
+  avatarFondo: palette.leonFondo,
+  avatarBorde: palette.leonBorde,
+
+  // indicadores de seccion (progreso)
+  seccionPeso: palette.navy700,
+  seccionConstancia: palette.emerald400,
+  seccionEntrenamientos: palette.amber500,
+  seccionNutricion: palette.rose500,
 } as const;
 
 // escala de energia percibida 1-5.
@@ -237,6 +259,7 @@ export const radius = {
   sm: 6,
   md: 10,
   lg: 16,
+  xl: 24,
   pill: 999,
 } as const;
 
@@ -254,6 +277,7 @@ export const fontSize = {
   subtitle: 18,
   title: 22,
   display: 32,   // numeros grandes del dashboard (kcal restantes)
+  metric: 38,    // numeros destacados de metricas (progreso)
   timer: 96,     // la cuenta del temporizador, que se lee a un metro
 } as const;
 
@@ -264,6 +288,7 @@ export const lineHeight = {
   subtitle: 26,
   title: 28,
   display: 38,
+  metric: 44,
   timer: 104,
 } as const;
 

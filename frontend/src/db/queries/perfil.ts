@@ -21,6 +21,8 @@ export interface NuevoPerfil {
   deporte_principal?: string | null;
   objetivo?: PerfilRow['objetivo'];
   peso_objetivo_kg?: number | null;
+  meta_agua_manual_ml?: number | null;
+  modo_nutricion?: PerfilRow['modo_nutricion'];
 }
 
 // Whitelist de columnas editables. Los nombres de columna se interpolan en el
@@ -34,6 +36,8 @@ const CAMPOS_EDITABLES = [
   'deporte_principal',
   'objetivo',
   'peso_objetivo_kg',
+  'meta_agua_manual_ml',
+  'modo_nutricion',
 ] as const;
 
 type CampoEditable = (typeof CAMPOS_EDITABLES)[number];
@@ -46,8 +50,8 @@ export async function crearPerfil(datos: NuevoPerfil): Promise<PerfilRow> {
     `INSERT INTO perfil (
        id, nombre, fecha_nacimiento, sexo_biologico, altura_cm,
        nivel_actividad, deporte_principal, objetivo, peso_objetivo_kg,
-       fecha_alta, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       meta_agua_manual_ml, modo_nutricion, fecha_alta, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       datos.id,
       datos.nombre ?? null,
@@ -58,6 +62,8 @@ export async function crearPerfil(datos: NuevoPerfil): Promise<PerfilRow> {
       datos.deporte_principal ?? null,
       datos.objetivo ?? null,
       datos.peso_objetivo_kg ?? null,
+      datos.meta_agua_manual_ml ?? null,
+      datos.modo_nutricion ?? 'objetivo',
       datos.fecha_alta,
       t,
       t,

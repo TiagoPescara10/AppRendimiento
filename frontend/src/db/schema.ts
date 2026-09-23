@@ -14,6 +14,8 @@
 import * as SQLite from 'expo-sqlite';
 import { migrar } from './migrations';
 import { sembrarAlimentos } from './seeds/alimentos';
+import { sembrarEjercicios } from './seeds/ejercicios';
+import { sembrarRutinasPredefinidas } from './seeds/rutinas-predefinidas';
 
 // ---------------------------------------------------------------------------
 // Enums — reflejan los CHECK del DDL. Si cambia uno, cambia el otro.
@@ -22,6 +24,7 @@ import { sembrarAlimentos } from './seeds/alimentos';
 export type SexoBiologico = 'masculino' | 'femenino';
 export type NivelActividad = 'sedentario' | 'ligero' | 'moderado' | 'alto' | 'muy_alto';
 export type Objetivo = 'bajar' | 'mantener' | 'subir' | 'rendimiento';
+export type ModoNutricion = 'objetivo' | 'recuento';
 export type FuentePeso = 'manual' | 'balanza' | 'health_kit';
 export type FuenteAlimento = 'open_food_facts' | 'usda' | 'manual' | 'vision';
 export type TipoComida = 'desayuno' | 'almuerzo' | 'merienda' | 'cena' | 'snack';
@@ -29,6 +32,9 @@ export type TipoEvento = 'partido' | 'entrenamiento' | 'gimnasio' | 'competencia
 export type Intensidad = 'baja' | 'media' | 'alta';
 export type FuenteSueno = 'manual' | 'health_kit' | 'health_connect';
 export type MomentoDia = 'manana' | 'tarde' | 'noche';
+export type ModoEntrenamiento = 'pasadas' | 'cronometro' | 'rutina';
+export type GrupoMuscular = 'pecho' | 'espalda' | 'piernas' | 'hombros' | 'brazos' | 'core' | 'cardio';
+export type CategoriaRutinaPredefinida = 'principiante' | 'split' | 'especifica';
 
 /** SQLite no tiene booleano: se guarda 0/1. */
 export type Bool01 = 0 | 1;
@@ -60,7 +66,19 @@ export interface PerfilRow {
   deporte_principal: string | null;
   objetivo: Objetivo | null;
   peso_objetivo_kg: number | null;
+  meta_agua_manual_ml: number | null;
+  modo_nutricion: ModoNutricion;
   fecha_alta: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RegistroAguaRow {
+  id: string;
+  usuario_id: string;
+  fecha: string;
+  hora: string;
+  ml: number;
   created_at: string;
   updated_at: string;
 }
@@ -137,6 +155,12 @@ export interface EventoRow {
   notas: string | null;
   /** null si el evento se creo suelto. Apunta a la rutina que lo genero. */
   rutina_id: string | null;
+  /** null si no salio de una rutina de gimnasio. */
+  rutina_gimnasio_id: string | null;
+  /** null para eventos manuales o de rutina deportiva. 'cronometro' | 'pasadas' | 'rutina' cuando proviene de sesion retroactiva. */
+  modo_entrenamiento: ModoEntrenamiento | null;
+  /** null para partido, competencia o gimnasio. Deporte especifico si tipo === 'entrenamiento'. */
+  deporte: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -156,42 +180,120 @@ export interface RutinaRow {
   duracion_estimada_min: number | null;
   intensidad: Intensidad;
   activa: Bool01;
+  /** null si no es de gimnasio o no tiene rutina de gimnasio fija asociada. */
+  rutina_gimnasio_id: string | null;
+  /** null para gimnasio o si no se especifico. Deporte especifico si tipo === 'entrenamiento'. */
+  deporte: string | null;
   created_at: string;
   updated_at: string;
 }
 
 /**
- * Detalle de una sesion del temporizador de intervalos.
+ * Catalogo de rutina de gimnasio: nombre y estado. Los ejercicios
+ * viven en rutina_gimnasio_ejercicio y la programacion de dias/horarios
+ * vive en la tabla rutina.
+ */
+export interface RutinaGimnasioRow {
+  id: string;
+  usuario_id: string;
+  nombre: string;
+  activa: Bool01;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Rutina de la biblioteca predefinida (migracion 017). Solo lectura: el
+ * usuario la copia a rutina_gimnasio, nunca la edita ni la borra.
+ */
+export interface RutinaPredefinidaRow {
+  id: string;
+  nombre: string;
+  categoria: CategoriaRutinaPredefinida;
+  descripcion: string | null;
+  orden: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RutinaPredefinidaEjercicioRow {
+  id: string;
+  rutina_predefinida_id: string;
+  ejercicio_id: string;
+  orden: number;
+}
+
+// La tabla rutina_gimnasio_dia se elimino en la migracion 014: los dias de una
+// rutina de gimnasio se leen de la tabla `rutina` via rutina_gimnasio_id.
+
+export interface RutinaGimnasioEjercicioRow {
+  id: string;
+  rutina_gimnasio_id: string;
+  ejercicio_id: string;
+  orden: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Detalle de una sesion de entrenamiento (pasadas, cronometro o rutina de gimnasio).
  *
  * Cuelga del evento: el usuario, la fecha y el tipo ya viven ahi y no se
- * duplican. Se guarda lo CONFIGURADO y lo COMPLETADO por separado, porque
- * programar 6 bloques y cortar en el 4 son dos hechos distintos.
+ * duplican. Se guarda lo CONFIGURADO y lo COMPLETADO por separado en pasadas y
+ * cronometro. En rutina los campos de intervalos son null y el detalle vive
+ * en las filas de `serie`.
  */
 export interface SesionEntrenamientoRow {
   id: string;
   evento_id: string;
+  modo: ModoEntrenamiento;
+  /** null si la sesion de gimnasio fue libre o ad-hoc sin rutina predefinida. */
+  rutina_gimnasio_id: string | null;
 
-  // lo configurado
-  bloques: number;
-  pasadas: number;
+  // lo configurado (null en rutina)
+  bloques: number | null;
+  pasadas: number | null;
   /** 0 = cronometro, o sea trabajo sin limite. Ver esCronometro(). */
-  trabajo_seg: number;
-  descanso_seg: number;
-  descanso_bloque_seg: number;
+  trabajo_seg: number | null;
+  descanso_seg: number | null;
+  descanso_bloque_seg: number | null;
 
-  // lo que se hizo
-  bloques_completados: number;
+  // lo que se hizo (null en rutina)
+  bloques_completados: number | null;
   /**
    * TOTAL de pasadas de la sesion entera, no las del ultimo bloque: 6 bloques
    * de 8 completos son 48. El bloque actual sale de dividir; al reves no se
    * puede reconstruir el total. Misma unidad que duracion_real_seg.
    */
-  pasadas_completadas: number;
-  duracion_real_seg: number;
+  pasadas_completadas: number | null;
+  /**
+   * En pasadas/cronometro: tiempo medido por el temporizador.
+   * En rutina: nullable (no se cuenta tiempo salvo que se mida).
+   */
+  duracion_real_seg: number | null;
 
-  /** Solo el cronometro la tiene. null en cualquier sesion de pasadas. */
+  /** Solo el cronometro la tiene. null en cualquier sesion de pasadas o rutina. */
   distancia_km: number | null;
 
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EjercicioRow {
+  id: string;
+  nombre: string;
+  grupo: GrupoMuscular;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SerieRow {
+  id: string;
+  sesion_id: string;
+  ejercicio_id: string;
+  orden: number;
+  repeticiones: number;
+  peso_kg: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -250,6 +352,9 @@ export async function initDb(nombre: string = NOMBRE_DB): Promise<SQLite.SQLiteD
   // SELECT COUNT(*) y nada mas. Va antes de asignar `conexion` porque recibe
   // `db` por parametro: getDb() todavia tiraria.
   await sembrarAlimentos(db);
+  await sembrarEjercicios(db);
+  // Despues de los ejercicios: las rutinas los referencian por nombre.
+  await sembrarRutinasPredefinidas(db);
 
   conexion = db;
   return conexion;

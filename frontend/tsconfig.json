@@ -2,6 +2,18 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // tsc en este proyecto SOLO chequea tipos; nunca compila. Quien construye
+    // el bundle es Metro, con Babel, y no mira este archivo.
+    //
+    // Esta en true para que no pueda volver a pasar lo del 8/9/2026: aparecieron
+    // trece .js compilados sueltos al lado de sus .ts en src/db/ y src/lib/,
+    // salida de algun tsc corrido sin -p. Sin outDir, tsc escribe cada .js al
+    // lado de su fuente. Con noEmit no escribe nada, corra como corra.
+    //
+    // Los scripts de scripts/probar-*.mjs NO se ven afectados: cada uno se
+    // escribe su propio tsconfig en un temporal, con su outDir, y ninguno
+    // extiende a este.
+    "noEmit": true,
     "paths": {
       "@/*": [
         "./src/*"

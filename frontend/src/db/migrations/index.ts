@@ -15,6 +15,18 @@ import { migracion002 } from './002_alimento_porciones';
 import { migracion003 } from './003_meta';
 import { migracion004 } from './004_rutinas';
 import { migracion005 } from './005_sesiones';
+import { migracion006 } from './006_ejercicios_rutina';
+import { migracion007 } from './007_rutinas_gimnasio';
+import { migracion008 } from './008_hidratacion';
+import { migracion009 } from './009_modo_nutricion';
+import { migracion010 } from './010_modo_entrenamiento_evento';
+import { migracion011 } from './011_deporte_evento';
+import { migracion012 } from './012_rutina_gimnasio_en_rutina';
+import { migracion013 } from './013_migrar_dias_gimnasio_a_rutina';
+import { migracion014 } from './014_limpiar_rutina_gimnasio_catalogo';
+import { migracion015 } from './015_rutina_sin_duplicados';
+import { migracion016 } from './016_deporte_rutina';
+import { migracion017 } from './017_rutinas_predefinidas';
 
 export interface Migracion {
   /** Entero creciente, sin huecos. Termina en PRAGMA user_version. */
@@ -30,6 +42,18 @@ export const migraciones: Migracion[] = [
   migracion003,
   migracion004,
   migracion005,
+  migracion006,
+  migracion007,
+  migracion008,
+  migracion009,
+  migracion010,
+  migracion011,
+  migracion012,
+  migracion013,
+  migracion014,
+  migracion015,
+  migracion016,
+  migracion017,
 ];
 
 /** Version del esquema que espera este build. */

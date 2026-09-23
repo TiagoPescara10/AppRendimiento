@@ -4,7 +4,7 @@
 // devuelve el proximo evento y sus datos.
 
 import { getDb } from '../schema';
-import type { EventoRow, Intensidad, TipoEvento } from '../schema';
+import type { EventoRow, Intensidad, ModoEntrenamiento, TipoEvento } from '../schema';
 
 const ahora = (): string => new Date().toISOString();
 
@@ -30,6 +30,12 @@ export interface NuevoEvento {
   notas?: string | null;
   /** La rutina que lo genero. null o ausente para un evento suelto. */
   rutina_id?: string | null;
+  /** La rutina de gimnasio que lo genero. null o ausente si no viene de gimnasio. */
+  rutina_gimnasio_id?: string | null;
+  /** Modo estructurado si proviene de sesion retroactiva (cronometro, pasadas, rutina). */
+  modo_entrenamiento?: ModoEntrenamiento | null;
+  /** Deporte especifico si tipo === 'entrenamiento'. null para otros tipos. */
+  deporte?: string | null;
 }
 
 export async function crearEvento(datos: NuevoEvento): Promise<EventoRow> {
@@ -37,8 +43,8 @@ export async function crearEvento(datos: NuevoEvento): Promise<EventoRow> {
   await getDb().runAsync(
     `INSERT INTO evento
        (id, usuario_id, tipo, fecha_hora_inicio, duracion_estimada_min,
-        intensidad, completado, respondido, notas, rutina_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        intensidad, completado, respondido, notas, rutina_id, rutina_gimnasio_id, modo_entrenamiento, deporte, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       datos.id,
       datos.usuario_id,
@@ -50,6 +56,9 @@ export async function crearEvento(datos: NuevoEvento): Promise<EventoRow> {
       datos.respondido ? 1 : 0,
       datos.notas ?? null,
       datos.rutina_id ?? null,
+      datos.rutina_gimnasio_id ?? null,
+      datos.modo_entrenamiento ?? null,
+      datos.deporte ?? null,
       t,
       t,
     ],
@@ -73,6 +82,30 @@ export async function listarEventosPorRango(
   return getDb().getAllAsync<EventoRow>(
     `SELECT * FROM evento
      WHERE usuario_id = ? AND fecha_hora_inicio BETWEEN ? AND ?
+     ORDER BY fecha_hora_inicio ASC`,
+    [usuarioId, desde, hasta],
+  );
+}
+
+/**
+ * Los eventos de un rango de DIAS, contra la columna generada `fecha`.
+ *
+ * Es la hermana de listarEventosPorRango() para cuando el rango se piensa en
+ * dias y no en instantes, que es el caso de la pantalla de Progreso: "los
+ * ultimos 30 dias" no tiene hora. Compara 'YYYY-MM-DD' con 'YYYY-MM-DD' y no
+ * hay que fabricar ningun ISO con offset, que es donde se cuelan los errores
+ * de un dia.
+ *
+ * `desde` y `hasta` son inclusive.
+ */
+export async function listarEventosPorRangoFecha(
+  usuarioId: string,
+  desde: string,
+  hasta: string,
+): Promise<EventoRow[]> {
+  return getDb().getAllAsync<EventoRow>(
+    `SELECT * FROM evento
+     WHERE usuario_id = ? AND fecha BETWEEN ? AND ?
      ORDER BY fecha_hora_inicio ASC`,
     [usuarioId, desde, hasta],
   );
@@ -128,6 +161,8 @@ export async function actualizarEvento(
     completado?: boolean;
     notas?: string | null;
     rutina_id?: string | null;
+    rutina_gimnasio_id?: string | null;
+    modo_entrenamiento?: ModoEntrenamiento | null;
   },
 ): Promise<void> {
   const campos: string[] = [];
@@ -160,6 +195,14 @@ export async function actualizarEvento(
   if (cambios.rutina_id !== undefined) {
     campos.push('rutina_id = ?');
     valores.push(cambios.rutina_id);
+  }
+  if (cambios.rutina_gimnasio_id !== undefined) {
+    campos.push('rutina_gimnasio_id = ?');
+    valores.push(cambios.rutina_gimnasio_id);
+  }
+  if (cambios.modo_entrenamiento !== undefined) {
+    campos.push('modo_entrenamiento = ?');
+    valores.push(cambios.modo_entrenamiento);
   }
   if (campos.length === 0) return;
 
@@ -294,3 +337,83 @@ export async function eliminarEventosFuturosDeRutina(
   );
   return r.changes;
 }
+
+export async function fechasMaterializadasDeRutinaGimnasio(
+  rutinaGimnasioIds: string[],
+  desde: string,
+  hasta: string,
+): Promise<{ rutina_gimnasio_id: string; fecha: string }[]> {
+  if (rutinaGimnasioIds.length === 0) return [];
+  const huecos = rutinaGimnasioIds.map(() => '?').join(', ');
+  return getDb().getAllAsync<{ rutina_gimnasio_id: string; fecha: string }>(
+    `SELECT rutina_gimnasio_id, fecha FROM evento
+     WHERE rutina_gimnasio_id IN (${huecos}) AND fecha BETWEEN ? AND ?`,
+    [...rutinaGimnasioIds, desde, hasta],
+  );
+}
+
+export async function eliminarEventosFuturosDeRutinaGimnasio(
+  rutinaGimnasioId: string,
+  desde: string,
+): Promise<number> {
+  const r = await getDb().runAsync(
+    'DELETE FROM evento WHERE rutina_gimnasio_id = ? AND fecha_hora_inicio >= ?',
+    [rutinaGimnasioId, desde],
+  );
+  return r.changes;
+}
+
+export async function buscarEventoDelDiaPorRutinaGimnasio(
+  usuarioId: string,
+  rutinaGimnasioId: string,
+  fecha: string,
+): Promise<EventoRow | null> {
+  return getDb().getFirstAsync<EventoRow>(
+    `SELECT * FROM evento
+     WHERE usuario_id = ? AND rutina_gimnasio_id = ? AND fecha = ?
+     LIMIT 1`,
+    [usuarioId, rutinaGimnasioId, fecha],
+  );
+}
+
+/**
+ * Suma los minutos de entrenamiento previstos o realizados para la fecha dada.
+ * Si un evento ya tiene sesion_entrenamiento con duracion_real_seg, usa esa duracion real.
+ * Si es futuro o no tiene sesion, usa duracion_estimada_min (con fallback a 60 min).
+ * Si el evento ya paso y fue respondido como no completado, no suma minutos.
+ */
+export async function minutosEntrenamientoDelDia(
+  usuarioId: string,
+  fecha: string,
+): Promise<number> {
+  const filas = await getDb().getAllAsync<{
+    duracion_estimada_min: number | null;
+    completado: number;
+    respondido: number;
+    duracion_real_seg: number | null;
+  }>(
+    `SELECT
+       e.duracion_estimada_min,
+       e.completado,
+       e.respondido,
+       s.duracion_real_seg
+     FROM evento e
+     LEFT JOIN sesion_entrenamiento s ON s.evento_id = e.id
+     WHERE e.usuario_id = ? AND e.fecha = ?`,
+    [usuarioId, fecha],
+  );
+
+  let totalMin = 0;
+  for (const f of filas) {
+    if (f.respondido === 1 && f.completado === 0) continue;
+
+    if (f.duracion_real_seg !== null && f.duracion_real_seg > 0) {
+      totalMin += Math.round(f.duracion_real_seg / 60);
+    } else {
+      totalMin += f.duracion_estimada_min ?? DURACION_POR_DEFECTO_MIN;
+    }
+  }
+
+  return totalMin;
+}
+

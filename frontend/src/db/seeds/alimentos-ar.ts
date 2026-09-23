@@ -83,7 +83,7 @@ const CRUDO: FilaCruda[] = [
   ['Rinones', 'carnes', 130, 20, 1, 5, 0, 'Porcion:150*'],
   ['Higado a la plancha', 'carnes', 175, 26, 4, 6, 0, 'Porcion:150*'],
   ['Carne picada comun', 'carnes', 250, 18, 0, 20, 0, 'Porcion:150*'],
-  ['Carne picada especial', 'carnes', 170, 21, 0, 9, 0, 'Porcion:150*'],
+  ['Carne picada especial', 'carnes', 190, 18, 0, 12.8, 0, 'Porcion:150*'],
   ['Hamburguesa casera de carne', 'carnes', 260, 19, 3, 19, 0, '1 hamburguesa:120*|2 hamburguesas:240'],
   ['Hamburguesa de paquete', 'carnes', 250, 15, 6, 18, 0.5, '1 hamburguesa:80*|2 hamburguesas:160'],
   ['Albondigas con salsa', 'carnes', 190, 14, 8, 11, 1, 'Porcion:250*'],
@@ -96,7 +96,8 @@ const CRUDO: FilaCruda[] = [
   ['Merluza a la plancha', 'carnes', 90, 18, 0, 1.5, 0, '1 filet:150*'],
   ['Merluza rebozada', 'carnes', 215, 15, 15, 11, 0.7, '1 filet:150*'],
   ['Salmon a la plancha', 'carnes', 210, 22, 0, 13, 0, 'Porcion:150*'],
-  ['Atun al natural en lata', 'carnes', 110, 24, 0, 1, 0, '1 lata escurrida:120*'],
+  // USDA Foundation mide 90 kcal y 19g P en atun al natural escurrido. El rotulado argentino suele declarar 110 kcal y 24g P.
+  ['Atun al natural en lata', 'carnes', 90, 19, 0, 1, 0, '1 lata escurrida:120*'],
   ['Atun en aceite en lata', 'carnes', 190, 22, 0, 11, 0, '1 lata escurrida:120*'],
   ['Sardinas en lata', 'carnes', 200, 22, 0, 12, 0, '1 lata:90*'],
   ['Caballa en lata', 'carnes', 180, 20, 0, 11, 0, '1 lata escurrida:120*'],
@@ -249,7 +250,7 @@ const CRUDO: FilaCruda[] = [
 
   // === FRUTAS ===
   ['Banana', 'frutas', 89, 1.1, 23, 0.3, 2.6, '1 banana:120*|2 bananas:240'],
-  ['Manzana', 'frutas', 52, 0.3, 14, 0.2, 2.4, '1 manzana:180*'],
+  ['Manzana', 'frutas', 62, 0.3, 14.8, 0.2, 2.4, '1 manzana:180*'],
   ['Naranja', 'frutas', 47, 0.9, 12, 0.1, 2.4, '1 naranja:180*'],
   ['Mandarina', 'frutas', 53, 0.8, 13, 0.3, 1.8, '1 mandarina:100*|2 mandarinas:200'],
   ['Pera', 'frutas', 57, 0.4, 15, 0.1, 3.1, '1 pera:170*'],

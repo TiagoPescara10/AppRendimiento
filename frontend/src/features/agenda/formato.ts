@@ -8,14 +8,77 @@
 // Solo formato. El criterio de agenda esta en materializar.ts y el SQL en
 // db/queries/eventos.ts.
 
-import type { TipoEvento, Intensidad } from '../../db/schema';
+import type { TipoEvento, Intensidad, ModoEntrenamiento } from '../../db/schema';
 
-export const ETIQUETA_TIPO: Record<TipoEvento, string> = {
-  entrenamiento: 'Entrenamiento',
-  gimnasio: 'Gimnasio',
-  partido: 'Partido',
-  competencia: 'Competencia',
-};
+/**
+ * Capitaliza el nombre de un deporte y aplica tildes o mayúsculas
+ * (ej: "futbol" -> "Fútbol", "basquet" -> "Básquet", "tenis" -> "Tenis").
+ */
+export function capitalizarDeporte(deporte?: string | null): string {
+  if (!deporte) return '';
+  const trimmed = deporte.trim();
+  if (!trimmed) return '';
+
+  const lower = trimmed.toLowerCase();
+  if (lower === 'futbol' || lower === 'fútbol') return 'Fútbol';
+  if (lower === 'futbol 11' || lower === 'fútbol 11') return 'Fútbol 11';
+  if (lower === 'futbol 5' || lower === 'fútbol 5') return 'Fútbol 5';
+  if (lower === 'futbol 7' || lower === 'fútbol 7') return 'Fútbol 7';
+  if (lower === 'futbol 8' || lower === 'fútbol 8') return 'Fútbol 8';
+  if (lower === 'basquet' || lower === 'básquet' || lower === 'baloncesto' || lower === 'basquetbol') return 'Básquet';
+  if (lower === 'natacion' || lower === 'natación') return 'Natación';
+  if (lower === 'padel' || lower === 'pádel') return 'Pádel';
+  if (lower === 'voley' || lower === 'voleibol') return 'Vóley';
+
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+export interface OpcionesEtiqueta {
+  rutinaId?: string | null;
+  modoEntrenamiento?: ModoEntrenamiento | null;
+  deporte?: string | null;
+}
+
+/**
+ * Etiqueta legible para el tipo de evento.
+ *
+ * - Evento con rutina_id: muestra el deporte del evento o deporte principal (ej: "Futbol").
+ * - Evento sin rutina_id con sesion de cronometro: "Cronometro libre".
+ * - Evento sin rutina_id con sesion de pasadas: "Pasadas".
+ * - Evento sin rutina_id con sesion de rutina de gimnasio: "Gimnasio".
+ * - Evento sin rutina_id puntual: deporte propio del evento si tiene, fallback a deporte_principal del perfil, o "Entrenamiento".
+ * - Llamadas sin opciones: deporte propio/principal o "Entrenamiento".
+ */
+export function etiquetaTipo(
+  tipo: TipoEvento | string,
+  deportePrincipal?: string | null,
+  opciones?: OpcionesEtiqueta,
+): string {
+  if (tipo === 'entrenamiento') {
+    if (!opciones?.rutinaId) {
+      if (opciones?.modoEntrenamiento === 'cronometro') {
+        return 'Cronómetro libre';
+      }
+      if (opciones?.modoEntrenamiento === 'pasadas') {
+        return 'Pasadas';
+      }
+      if (opciones?.modoEntrenamiento === 'rutina') {
+        return 'Gimnasio';
+      }
+    }
+
+    const deporteEfectivo = opciones?.deporte?.trim() || deportePrincipal;
+    const deporteCap = capitalizarDeporte(deporteEfectivo);
+    return deporteCap || 'Entrenamiento';
+  }
+  if (tipo === 'gimnasio') return 'Gimnasio';
+  if (tipo === 'partido') return 'Partido';
+  if (tipo === 'competencia') return 'Competencia';
+  return tipo;
+}
+
+/** Alias para compatibilidad hacia atras. */
+export const ETIQUETA_TIPO = etiquetaTipo;
 
 export const ETIQUETA_INTENSIDAD: Record<Intensidad, string> = {
   baja: 'Intensidad baja',

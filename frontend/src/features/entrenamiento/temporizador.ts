@@ -388,6 +388,7 @@ export function formatearSegundos(segundos: number): string {
  * no hay estructura que contar.
  */
 export function etiquetaProgreso(fase: Fase, config: ConfigTemporizador): string {
+  if (esCronometro(config)) return '';
   const partes: string[] = [];
   if (config.bloques > 1) partes.push(`Bloque ${fase.bloque} de ${config.bloques}`);
   if (config.pasadas > 1) partes.push(`Pasada ${fase.pasada} de ${config.pasadas}`);

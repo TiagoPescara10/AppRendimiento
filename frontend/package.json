@@ -48,6 +48,11 @@
     "lint": "expo lint",
     "test:db": "node scripts/probar-db.mjs",
     "test:temporizador": "node scripts/probar-temporizador.mjs",
+    "test:progreso": "node scripts/probar-progreso.mjs",
+    "test:fuerza": "node scripts/probar-fuerza.mjs",
+    "test:validacion": "node scripts/probar-validacion.mjs",
+    "test:seed": "node scripts/probar-seed-desarrollo.mjs",
+    "seed:dev": "node scripts/seed-desarrollo.mjs",
     "sonidos": "node scripts/generar-sonidos.mjs"
   },
   "private": true

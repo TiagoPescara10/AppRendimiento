@@ -6,7 +6,7 @@
 // carga y no se guarda: depende del peso, que cambia.
 
 import { useState, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 
 import { Ionicons } from '@expo/vector-icons';
@@ -15,20 +15,23 @@ import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
 import { colors, spacing, radius, fontSize, fontWeight, lineHeight, shadow, sizes } from '@/ui/theme';
 
-import { calcularTodo } from '@/lib/nutricion';
+import { calcularTodo, calcularMetaAgua } from '@/lib/nutricion';
 import type { ResultadoNutricional } from '@/lib/nutricion';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import { ultimoPeso } from '@/db/queries/peso';
 import { listarComidasPorFecha, listarItemsConAlimento } from '@/db/queries/comidas';
+import { totalDelDia, registrarAgua, eliminarUltimoRegistro } from '@/db/queries/agua';
 import { CartelPendientes } from '@/features/agenda/components/CartelPendientes';
-import { proximosEventos } from '@/db/queries/eventos';
+import { SheetModoEntrenamiento } from '@/features/entrenamiento/components/SheetModoEntrenamiento';
+import { proximosEventos, minutosEntrenamientoDelDia } from '@/db/queries/eventos';
+import { CardHidratacion } from '@/features/nutricion/components/CardHidratacion';
 import { MascotaLeon } from '@/features/mascota/MascotaLeon';
 import {
   obtenerConsejoLeon,
   type ConsejoLeon,
   type EventoProximoResumen,
 } from '@/features/mascota/logicaConsejos';
-import type { TipoComida } from '@/db/schema';
+import type { TipoComida, PerfilRow } from '@/db/schema';
 import { calcularEdad, aFechaLocal } from '@/lib/fechas';
 
 // ---------------------------------------------------------------------------
@@ -53,10 +56,13 @@ type Estado = {
   /** El cartel de eventos sin responder lo necesita para su consulta. */
   usuarioId: string;
   nombreUsuario: string | null;
+  modoNutricion: PerfilRow['modo_nutricion'];
   objetivo: ResultadoNutricional | null;
   consumido: Macros;
   comidas: ComidaResumen[];
   consejo: ConsejoLeon;
+  aguaTotal: number;
+  metaAgua: number;
 };
 
 const VACIO: Macros = { kcal: 0, prot: 0, carb: 0, grasa: 0 };
@@ -75,8 +81,9 @@ function capitalizar(texto: string): string {
 export default function Dashboard() {
   const router = useRouter();
   const [estado, setEstado] = useState<Estado | null>(null);
+  const [sheetEntrenarVisible, setSheetEntrenarVisible] = useState(false);
 
-  // useFocusEffect y no useEffect: al volver de registrar una comida, el
+  // useFocusEffect y no useEffect: al volver de registrar una comida o agua, el
   // dashboard tiene que reflejarla.
   useFocusEffect(
     useCallback(() => {
@@ -89,10 +96,12 @@ export default function Dashboard() {
         const hoy = aFechaLocal(new Date());
         const ahoraIso = new Date().toISOString();
         const mananaIso = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
-        const [peso, comidas, proximos] = await Promise.all([
+        const [peso, comidas, proximos, aguaTotal, minEntreno] = await Promise.all([
           ultimoPeso(perfil.id),
           listarComidasPorFecha(perfil.id, hoy),
           proximosEventos(perfil.id, ahoraIso, mananaIso, 1),
+          totalDelDia(perfil.id, hoy),
+          minutosEntrenamientoDelDia(perfil.id, hoy),
         ]);
 
         // Una query de items por comida. Con 3-5 comidas por dia es barato;
@@ -124,6 +133,9 @@ export default function Dashboard() {
                 objetivo: perfil.objetivo,
               })
             : null;
+
+        const pesoKg = peso?.peso_kg ?? 70;
+        const metaAgua = perfil.meta_agua_manual_ml ?? calcularMetaAgua(pesoKg, minEntreno);
 
         // Se acumula sin redondear y se redondea recien al mostrar: redondear
         // cada item hace que la suma de las partes no de el total.
@@ -167,9 +179,12 @@ export default function Dashboard() {
         setEstado({
           usuarioId: perfil.id,
           nombreUsuario: perfil.nombre,
+          modoNutricion: perfil.modo_nutricion,
           objetivo,
           consumido,
           consejo,
+          aguaTotal,
+          metaAgua,
           comidas: conItems.map(({ comida, items }) => ({
             id: comida.id,
             tipo: comida.tipo,
@@ -196,11 +211,49 @@ export default function Dashboard() {
     );
   }
 
-  const { usuarioId, objetivo, consumido, comidas } = estado;
+  const { usuarioId, objetivo, consumido, comidas, modoNutricion } = estado;
+  const esRecuento = modoNutricion === 'recuento' || !objetivo;
   const meta = objetivo?.kcal_objetivo ?? 0;
   const restante = Math.round(meta - consumido.kcal);
   const proporcion = meta > 0 ? Math.min(1, consumido.kcal / meta) : 0;
   const seExcedio = restante < 0;
+
+  const manejarAgregarAgua = async (ml: number) => {
+    if (!estado) return;
+    const anterior = estado.aguaTotal;
+    const hoy = aFechaLocal(new Date());
+
+    // Actualizacion optimista inmediata para reflejar el cambio al instante
+    setEstado((prev) => (prev ? { ...prev, aguaTotal: prev.aguaTotal + ml } : null));
+
+    try {
+      await registrarAgua({ usuario_id: estado.usuarioId, ml, fecha: hoy });
+      // Sincronizacion con la fuente de verdad en base de datos
+      const totalReal = await totalDelDia(estado.usuarioId, hoy);
+      setEstado((prev) => (prev ? { ...prev, aguaTotal: totalReal } : null));
+    } catch (error) {
+      console.error('Error al registrar agua:', error);
+      // Rollback al valor previo si falla la persistencia
+      setEstado((prev) => (prev ? { ...prev, aguaTotal: anterior } : null));
+      Alert.alert('Error', 'No se pudo guardar la toma de agua.');
+    }
+  };
+
+  const manejarDeshacerAgua = async () => {
+    if (!estado || estado.aguaTotal <= 0) return;
+    const anterior = estado.aguaTotal;
+    const hoy = aFechaLocal(new Date());
+
+    try {
+      await eliminarUltimoRegistro(estado.usuarioId, hoy);
+      const nuevoTotal = await totalDelDia(estado.usuarioId, hoy);
+      setEstado((prev) => (prev ? { ...prev, aguaTotal: nuevoTotal } : null));
+    } catch (error) {
+      console.error('Error al deshacer agua:', error);
+      setEstado((prev) => (prev ? { ...prev, aguaTotal: anterior } : null));
+      Alert.alert('Error', 'No se pudo deshacer la toma de agua.');
+    }
+  };
 
   const fecha = new Date().toLocaleDateString('es-AR', {
     weekday: 'long',
@@ -217,49 +270,65 @@ export default function Dashboard() {
         fechaTexto={fecha}
       />
 
-      {/* Lo que queda del dia */}
-      <View style={estilos.destacado}>
-        <Text style={estilos.destacadoLabel}>
-          {seExcedio ? 'Te pasaste por' : 'Te quedan'}
-        </Text>
-        <Text style={[estilos.destacadoNumero, seExcedio && estilos.excedido]}>
-          {Math.abs(restante).toLocaleString('es-AR')}
-        </Text>
-        <Text style={estilos.destacadoLabel}>de {meta.toLocaleString('es-AR')} kcal</Text>
-        <View style={estilos.barraFondo}>
-          <View
-            style={[
-              estilos.barraRelleno,
-              { width: `${proporcion * 100}%` },
-              seExcedio && estilos.barraExcedida,
-            ]}
-          />
+      {/* Lo que queda del dia o total consumido */}
+      {esRecuento ? (
+        <View style={estilos.destacado}>
+          <Text style={estilos.destacadoLabel}>Consumiste</Text>
+          <Text style={estilos.destacadoNumero}>
+            {Math.round(consumido.kcal).toLocaleString('es-AR')}
+          </Text>
+          <Text style={estilos.destacadoLabel}>kcal hoy</Text>
         </View>
-      </View>
-
-      {/* Macros */}
-      {objetivo && (
-        <View style={estilos.macros}>
-          <Macro
-            label="Proteína"
-            actual={consumido.prot}
-            meta={objetivo.macros.proteina_g}
-            estiloBarra={estilos.macroBarraProteina}
-          />
-          <Macro
-            label="Carbos"
-            actual={consumido.carb}
-            meta={objetivo.macros.carbohidratos_g}
-            estiloBarra={estilos.macroBarraCarbos}
-          />
-          <Macro
-            label="Grasas"
-            actual={consumido.grasa}
-            meta={objetivo.macros.grasa_g}
-            estiloBarra={estilos.macroBarraGrasas}
-          />
+      ) : (
+        <View style={estilos.destacado}>
+          <Text style={estilos.destacadoLabel}>
+            {seExcedio ? 'Te pasaste por' : 'Te quedan'}
+          </Text>
+          <Text style={[estilos.destacadoNumero, seExcedio && estilos.excedido]}>
+            {Math.abs(restante).toLocaleString('es-AR')}
+          </Text>
+          <Text style={estilos.destacadoLabel}>de {meta.toLocaleString('es-AR')} kcal</Text>
+          <View style={estilos.barraFondo}>
+            <View
+              style={[
+                estilos.barraRelleno,
+                { width: `${proporcion * 100}%` },
+                seExcedio && estilos.barraExcedida,
+              ]}
+            />
+          </View>
         </View>
       )}
+
+      {/* Macros */}
+      <View style={estilos.macros}>
+        <Macro
+          label="Proteína"
+          actual={consumido.prot}
+          meta={objetivo?.macros.proteina_g}
+          estiloBarra={estilos.macroBarraProteina}
+        />
+        <Macro
+          label="Carbos"
+          actual={consumido.carb}
+          meta={objetivo?.macros.carbohidratos_g}
+          estiloBarra={estilos.macroBarraCarbos}
+        />
+        <Macro
+          label="Grasas"
+          actual={consumido.grasa}
+          meta={objetivo?.macros.grasa_g}
+          estiloBarra={estilos.macroBarraGrasas}
+        />
+      </View>
+
+      {/* Hidratacion */}
+      <CardHidratacion
+        actualMl={estado.aguaTotal}
+        metaMl={estado.metaAgua}
+        onAgregar={manejarAgregarAgua}
+        onDeshacer={manejarDeshacerAgua}
+      />
 
       <Text style={estilos.seccion}>Comiste</Text>
 
@@ -311,7 +380,7 @@ export default function Dashboard() {
           titulo="Entrenar"
           icono="barbell-outline"
           variante="secundario"
-          onPress={() => router.push('/evento/temporizador')}
+          onPress={() => setSheetEntrenarVisible(true)}
         />
       </View>
 
@@ -325,6 +394,11 @@ export default function Dashboard() {
       {/* Va aca y no en el layout raiz: asi nunca aparece sobre el onboarding
           ni sobre el registro. Se muestra una sola vez por sesion de app. */}
       <CartelPendientes usuarioId={usuarioId} />
+
+      <SheetModoEntrenamiento
+        visible={sheetEntrenarVisible}
+        onCerrar={() => setSheetEntrenarVisible(false)}
+      />
     </Pantalla>
   );
 }
@@ -376,7 +450,7 @@ function BotonAccion({
   );
 }
 
-/** Una card de macro con su barra de progreso. */
+/** Una card de macro con su barra de progreso (o contador simple si no hay meta). */
 function Macro({
   label,
   actual,
@@ -385,21 +459,24 @@ function Macro({
 }: {
   label: string;
   actual: number;
-  meta: number;
+  meta?: number | null;
   estiloBarra: object;
 }) {
-  const proporcion = meta > 0 ? Math.min(1, actual / meta) : 0;
+  const tieneMeta = meta != null && meta > 0;
+  const proporcion = tieneMeta ? Math.min(1, actual / meta) : 0;
 
   return (
     <View style={estilos.macro}>
       <Text style={estilos.macroLabel}>{label}</Text>
       <Text style={estilos.macroValor}>
         {Math.round(actual)}
-        <Text style={estilos.macroObjetivo}> / {meta} g</Text>
+        <Text style={estilos.macroObjetivo}>{tieneMeta ? ` / ${meta} g` : ' g'}</Text>
       </Text>
-      <View style={estilos.macroBarraFondo}>
-        <View style={[estiloBarra, { width: `${proporcion * 100}%` }]} />
-      </View>
+      {tieneMeta && (
+        <View style={estilos.macroBarraFondo}>
+          <View style={[estiloBarra, { width: `${proporcion * 100}%` }]} />
+        </View>
+      )}
     </View>
   );
 }
@@ -417,7 +494,7 @@ const estilos = StyleSheet.create({
   destacado: {
     backgroundColor: colors.surface,
     borderRadius: radius.md,
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     alignItems: 'center',
     ...shadow.card,
@@ -440,7 +517,7 @@ const estilos = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: colors.border,
     overflow: 'hidden',
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
   },
   barraRelleno: { height: '100%', backgroundColor: colors.action },
   barraExcedida: { backgroundColor: colors.danger },
@@ -452,13 +529,24 @@ const estilos = StyleSheet.create({
     borderRadius: radius.md,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.sm,
-    gap: spacing.xs,
+    alignItems: 'center',
+    gap: 4,
     ...shadow.card,
   },
-  macroLabel: { fontSize: fontSize.caption, color: colors.textSecondary },
-  macroValor: { fontSize: fontSize.body, fontWeight: fontWeight.medium, color: colors.textPrimary },
+  macroLabel: {
+    fontSize: fontSize.caption,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  macroValor: {
+    fontSize: fontSize.body,
+    fontWeight: fontWeight.medium,
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
   macroObjetivo: { fontSize: fontSize.caption, color: colors.textSecondary },
   macroBarraFondo: {
+    width: '100%',
     height: 4,
     borderRadius: 2,
     backgroundColor: colors.border,

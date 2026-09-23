@@ -25,6 +25,10 @@ export interface NuevaRutina {
   intensidad: Intensidad;
   /** Por defecto true: una rutina recien creada arranca generando. */
   activa?: boolean;
+  /** null si no tiene rutina de gimnasio fija asociada. */
+  rutina_gimnasio_id?: string | null;
+  /** null para gimnasio o si no se especifico. Deporte especifico si tipo === 'entrenamiento'. */
+  deporte?: string | null;
 }
 
 export async function crearRutina(datos: NuevaRutina): Promise<RutinaRow> {
@@ -32,8 +36,8 @@ export async function crearRutina(datos: NuevaRutina): Promise<RutinaRow> {
   await getDb().runAsync(
     `INSERT INTO rutina
        (id, usuario_id, dia_semana, hora, tipo, duracion_estimada_min,
-        intensidad, activa, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        intensidad, activa, rutina_gimnasio_id, deporte, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       datos.id,
       datos.usuario_id,
@@ -43,6 +47,8 @@ export async function crearRutina(datos: NuevaRutina): Promise<RutinaRow> {
       datos.duracion_estimada_min ?? null,
       datos.intensidad,
       datos.activa === false ? 0 : 1,
+      datos.rutina_gimnasio_id ?? null,
+      datos.deporte ?? null,
       t,
       t,
     ],
@@ -55,6 +61,45 @@ export async function crearRutina(datos: NuevaRutina): Promise<RutinaRow> {
 
 export async function obtenerRutina(id: string): Promise<RutinaRow | null> {
   return getDb().getFirstAsync<RutinaRow>('SELECT * FROM rutina WHERE id = ?', [id]);
+}
+
+/**
+ * La fila activa que ya ocupa ese dia para la misma cosa, o null.
+ *
+ * Con rutina de gimnasio, "la misma cosa" es la rutina en si: un dia tiene a
+ * lo sumo una fila activa por rutina_gimnasio_id, sin importar la hora (el
+ * indice unico de la migracion 015 lo exige). Sin rutina de gimnasio no hay
+ * identidad propia, asi que se compara por tipo y hora.
+ */
+export async function buscarRutinaActivaDelDia(
+  usuarioId: string,
+  diaSemana: number,
+  tipo: TipoEvento,
+  hora: string,
+  rutinaGimnasioId: string | null,
+  deporte?: string | null,
+): Promise<RutinaRow | null> {
+  if (rutinaGimnasioId) {
+    return getDb().getFirstAsync<RutinaRow>(
+      `SELECT * FROM rutina
+       WHERE usuario_id = ? AND dia_semana = ? AND rutina_gimnasio_id = ? AND activa = 1`,
+      [usuarioId, diaSemana, rutinaGimnasioId],
+    );
+  }
+  if (deporte) {
+    return getDb().getFirstAsync<RutinaRow>(
+      `SELECT * FROM rutina
+       WHERE usuario_id = ? AND dia_semana = ? AND tipo = ? AND hora = ?
+         AND deporte = ? AND rutina_gimnasio_id IS NULL AND activa = 1`,
+      [usuarioId, diaSemana, tipo, hora, deporte],
+    );
+  }
+  return getDb().getFirstAsync<RutinaRow>(
+    `SELECT * FROM rutina
+     WHERE usuario_id = ? AND dia_semana = ? AND tipo = ? AND hora = ?
+       AND rutina_gimnasio_id IS NULL AND activa = 1`,
+    [usuarioId, diaSemana, tipo, hora],
+  );
 }
 
 /**
@@ -83,6 +128,8 @@ export async function actualizarRutina(
     duracion_estimada_min?: number | null;
     intensidad?: Intensidad;
     activa?: boolean;
+    rutina_gimnasio_id?: string | null;
+    deporte?: string | null;
   },
 ): Promise<void> {
   const campos: string[] = [];
@@ -111,6 +158,14 @@ export async function actualizarRutina(
   if (cambios.activa !== undefined) {
     campos.push('activa = ?');
     valores.push(cambios.activa ? 1 : 0);
+  }
+  if (cambios.rutina_gimnasio_id !== undefined) {
+    campos.push('rutina_gimnasio_id = ?');
+    valores.push(cambios.rutina_gimnasio_id);
+  }
+  if (cambios.deporte !== undefined) {
+    campos.push('deporte = ?');
+    valores.push(cambios.deporte);
   }
   if (campos.length === 0) return;
 

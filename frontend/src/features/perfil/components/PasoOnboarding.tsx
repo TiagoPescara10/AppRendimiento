@@ -37,7 +37,7 @@ export function PasoOnboarding({
 
       {children}
 
-      <Boton titulo={textoBoton} onPress={onSiguiente} cargando={guardando} />
+      <Boton titulo={textoBoton} onPress={onSiguiente} cargando={guardando} disabled={!puedeSeguir} />
     </Pantalla>
   );
 }

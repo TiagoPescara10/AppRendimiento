@@ -1,19 +1,33 @@
+// app/onboarding/datos.tsx
+//
+// Paso 2: Datos personales.
+// En modo recuento solo pide nombre y altura (version liviana sin fecha ni sexo).
+// En modo objetivo pide nombre, fecha de nacimiento, altura y sexo para calcular TDEE e IMC.
+
 import { View, Text, Pressable, StyleSheet, Alert, Platform } from 'react-native';
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { colors, spacing, radius, fontSize, sizes, shadow } from '@/ui/theme';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Input } from '@/ui/Input';
 import { aFechaLocal } from '@/lib/fechas';
 import { Boton } from '@/ui/Boton';
-import { crearPerfil, actualizarPerfil, obtenerPerfilLocal } from '@/db/queries/perfil';
+import {
+  crearPerfil,
+  actualizarPerfil,
+  obtenerPerfilLocal,
+  type CambiosPerfil,
+} from '@/db/queries/perfil';
 import { randomUUID } from '@/db/sync/uuid';
 import { router } from 'expo-router';
 import { PasoOnboarding } from '@/features/perfil/components/PasoOnboarding';
-
-const ALTURA_MIN_CM = 100;
-const ALTURA_MAX_CM = 250;
+import { validarDatosPerfil } from '@/lib/validacion';
+import { useOnboarding } from '@/features/perfil/hooks/useOnboarding';
 
 export default function Datos() {
+  const { perfil, cargando } = useOnboarding();
+  const esRecuento = perfil?.modo_nutricion === 'recuento';
+  const totalPasos = esRecuento ? 4 : 6;
+
   const [nombre, setNombre] = useState('');
   const [fechaNacimiento, setFechaNacimiento] = useState<Date | null>(null);
   const [altura, setAltura] = useState('');
@@ -21,38 +35,52 @@ export default function Datos() {
   const [abierto, setAbierto] = useState(false);
   const [guardando, setGuardando] = useState(false);
 
-  // El estado de React se lee del render, asi que dos taps en el mismo frame
-  // verian guardando === false los dos. El ref cambia en el acto y cierra esa
-  // ventana; el estado existe para deshabilitar el boton en pantalla.
   const guardandoRef = useRef(false);
 
   const hace18 = new Date();
   hace18.setFullYear(hace18.getFullYear() - 18);
 
+  // Precargar si el perfil ya existe
+  useEffect(() => {
+    if (perfil) {
+      if (perfil.nombre) setNombre(perfil.nombre);
+      if (perfil.altura_cm) setAltura(String(perfil.altura_cm));
+      if (perfil.sexo_biologico) setSexo(perfil.sexo_biologico);
+      if (perfil.fecha_nacimiento) {
+        setFechaNacimiento(new Date(perfil.fecha_nacimiento));
+      }
+    }
+  }, [perfil]);
+
   const guardar = async () => {
     if (guardandoRef.current) return;
 
-    if (!nombre || !fechaNacimiento || !altura || !sexo) {
-      Alert.alert('Faltan datos', 'Completá todos los campos.');
-      return;
-    }
-
-    // parseFloat('abc') es NaN, y NaN entra a la base sin que nadie chiste:
-    // SQLite lo guarda como NULL y el TDEE despues sale mal sin explicacion.
     const alturaCm = parseFloat(altura.replace(',', '.'));
-    if (!Number.isFinite(alturaCm) || alturaCm < ALTURA_MIN_CM || alturaCm > ALTURA_MAX_CM) {
-      Alert.alert('Altura inválida', `Ingresá una altura entre ${ALTURA_MIN_CM} y ${ALTURA_MAX_CM} cm.`);
+    const val = validarDatosPerfil({
+      nombre,
+      alturaCm: Number.isFinite(alturaCm) ? alturaCm : null,
+      fechaNacimiento,
+      sexoBiologico: sexo,
+      modoNutricion: perfil?.modo_nutricion ?? 'objetivo',
+    });
+
+    if (!val.ok) {
+      Alert.alert(val.titulo, val.mensaje);
       return;
     }
 
     guardandoRef.current = true;
     setGuardando(true);
 
-    const datos = {
-      nombre,
-      fecha_nacimiento: aFechaLocal(fechaNacimiento),
+    const datos: CambiosPerfil = {
+      nombre: nombre.trim(),
       altura_cm: alturaCm,
-      sexo_biologico: sexo,
+      ...(esRecuento
+        ? {}
+        : {
+            fecha_nacimiento: aFechaLocal(fechaNacimiento!),
+            sexo_biologico: sexo!,
+          }),
     };
 
     try {
@@ -60,7 +88,12 @@ export default function Datos() {
       if (existente) {
         await actualizarPerfil(existente.id, datos);
       } else {
-        await crearPerfil({ id: randomUUID(), fecha_alta: new Date().toISOString(), ...datos });
+        await crearPerfil({
+          id: randomUUID(),
+          fecha_alta: new Date().toISOString(),
+          modo_nutricion: perfil?.modo_nutricion ?? 'objetivo',
+          ...datos,
+        });
       }
       router.push('/onboarding/peso');
     } catch (e) {
@@ -73,60 +106,25 @@ export default function Datos() {
   };
 
   return (
-    <PasoOnboarding 
-    paso={1} 
-    totalPasos={5} 
-    titulo="Datos personales" 
-    onSiguiente={guardar} 
-    guardando={guardando}>
-
-      <Input placeholder="Nombre" value={nombre} onChangeText={setNombre} label="Nombre" />
-
-      <View>
-        <Text style={estilos.label}>Fecha de nacimiento</Text>
-        <Pressable style={estilos.campoFecha} onPress={() => setAbierto(true)}>
-          <Text style={fechaNacimiento ? estilos.textoFecha : estilos.placeholderFecha}>
-            {fechaNacimiento ? fechaNacimiento.toLocaleDateString() : 'Seleccioná tu fecha'}
-          </Text>
-        </Pressable>
-      </View>
-
-      {/* El fondo va en el View: la prop backgroundColor del picker fue
-          removida en la v8, y de todos modos era iOS-only. */}
-      {abierto && (
-        <View style={estilos.contenedorPicker}>
-          <DateTimePicker
-            value={fechaNacimiento ?? new Date(2000, 0, 1)}
-            mode="date"
-            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-            maximumDate={hace18}
-            // Solo iOS. Sin esto el picker sigue la apariencia del sistema: en
-            // un telefono en modo oscuro queda texto blanco sobre el fondo claro
-            // de la app y no se lee nada. La paleta del proyecto es unica y
-            // clara, asi que se fija a light en vez de seguir al sistema.
-            themeVariant="light"
-            textColor={colors.textPrimary}
-            accentColor={colors.action}
-            // onValueChange solo llega cuando el usuario ELIGE una fecha, y
-            // cancelar sale por onDismiss. Eso resuelve solo lo que antes
-            // habia que atajar a mano: con onChange, cancelar llegaba por el
-            // mismo camino y con la fecha original, asi que sin mirar
-            // event.type cancelar equivalia a aceptar.
-            onValueChange={(_, nueva) => {
-              // Android: dialogo modal, dispara una sola vez, al confirmar.
-              // iOS: es inline y dispara en CADA giro de la rueda, asi que
-              // cerrarlo aca lo mataria apenas el usuario lo toca. En iOS lo
-              // cierra el boton "Listo" de abajo.
-              if (Platform.OS === 'android') setAbierto(false);
-              setFechaNacimiento(nueva);
-            }}
-            onDismiss={() => setAbierto(false)}
-          />
-          {Platform.OS === 'ios' && (
-            <Boton titulo="Listo" variante="secundario" onPress={() => setAbierto(false)} />
-          )}
-        </View>
-      )}
+    <PasoOnboarding
+      paso={2}
+      totalPasos={totalPasos}
+      titulo="Datos personales"
+      subtitulo={
+        esRecuento
+          ? 'Solo necesitamos tu nombre y altura para tu perfil.'
+          : 'Completá tus datos para el cálculo de tu objetivo.'
+      }
+      onSiguiente={guardar}
+      guardando={guardando || cargando}
+      puedeSeguir={!cargando}
+    >
+      <Input
+        placeholder="Nombre"
+        value={nombre}
+        onChangeText={setNombre}
+        label="Nombre"
+      />
 
       <Input
         placeholder="Altura"
@@ -136,22 +134,57 @@ export default function Datos() {
         label="Altura (cm)"
       />
 
-      <View>
-        <Text style={estilos.label}>Sexo</Text>
-        <View style={estilos.fila}>
-          <Boton
-            titulo="Masculino"
-            variante={sexo === 'masculino' ? 'primario' : 'secundario'}
-            onPress={() => setSexo('masculino')}
-          />
-          <Boton
-            titulo="Femenino"
-            variante={sexo === 'femenino' ? 'primario' : 'secundario'}
-            onPress={() => setSexo('femenino')}
-          />
-        </View>
-      </View>
+      {/* Campos para calculo calorico (solo modo objetivo) */}
+      {!esRecuento && (
+        <>
+          <View>
+            <Text style={estilos.label}>Fecha de nacimiento</Text>
+            <Pressable style={estilos.campoFecha} onPress={() => setAbierto(true)}>
+              <Text style={fechaNacimiento ? estilos.textoFecha : estilos.placeholderFecha}>
+                {fechaNacimiento ? fechaNacimiento.toLocaleDateString() : 'Seleccioná tu fecha'}
+              </Text>
+            </Pressable>
+          </View>
 
+          {abierto && (
+            <View style={estilos.contenedorPicker}>
+              <DateTimePicker
+                value={fechaNacimiento ?? new Date(2000, 0, 1)}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                maximumDate={hace18}
+                themeVariant="light"
+                textColor={colors.textPrimary}
+                accentColor={colors.action}
+                onValueChange={(_, nueva) => {
+                  if (Platform.OS === 'android') setAbierto(false);
+                  setFechaNacimiento(nueva);
+                }}
+                onDismiss={() => setAbierto(false)}
+              />
+              {Platform.OS === 'ios' && (
+                <Boton titulo="Listo" variante="secundario" onPress={() => setAbierto(false)} />
+              )}
+            </View>
+          )}
+
+          <View>
+            <Text style={estilos.label}>Sexo biológico</Text>
+            <View style={estilos.fila}>
+              <Boton
+                titulo="Masculino"
+                variante={sexo === 'masculino' ? 'primario' : 'secundario'}
+                onPress={() => setSexo('masculino')}
+              />
+              <Boton
+                titulo="Femenino"
+                variante={sexo === 'femenino' ? 'primario' : 'secundario'}
+                onPress={() => setSexo('femenino')}
+              />
+            </View>
+          </View>
+        </>
+      )}
     </PasoOnboarding>
   );
 }
@@ -166,8 +199,8 @@ const estilos = StyleSheet.create({
     ...shadow.card,
   },
   campoFecha: {
-    height: sizes.control,          
-    justifyContent: 'center', 
+    height: sizes.control,
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
@@ -175,6 +208,6 @@ const estilos = StyleSheet.create({
     paddingVertical: spacing.sm,
     backgroundColor: colors.surface,
   },
-  textoFecha: { fontSize: fontSize.body, color: colors.textSecondary },
+  textoFecha: { fontSize: fontSize.body, color: colors.textPrimary },
   placeholderFecha: { fontSize: fontSize.body, color: colors.textSecondary },
 });

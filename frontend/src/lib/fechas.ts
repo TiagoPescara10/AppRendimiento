@@ -44,7 +44,7 @@ export function aISOLocal(d: Date): string {
 }
 
 export function calcularEdad(nacimiento: Date | string): number {
-  const fecha = typeof nacimiento === 'string' ? aFecha(nacimiento) : nacimiento;
+  const fecha = typeof nacimiento === 'string' ? desdeFechaLocal(nacimiento) : nacimiento;
 
   const hoy = new Date();
   let edad = hoy.getFullYear() - fecha.getFullYear();
@@ -56,7 +56,32 @@ export function calcularEdad(nacimiento: Date | string): number {
 }
 
 /** 'YYYY-MM-DD' a Date en hora local. new Date(str) lo lee como UTC. */
-function aFecha(iso: string): Date {
+export function desdeFechaLocal(iso: string): Date {
   const [a, m, d] = iso.split('-').map(Number);
   return new Date(a, m - 1, d);
+}
+
+/**
+ * Dias enteros de `desde` a `hasta`, las dos en 'YYYY-MM-DD'. Negativo si
+ * `hasta` es anterior.
+ *
+ * Va por medianoche LOCAL y redondea, no trunca: si algun dia el pais vuelve
+ * a tener horario de verano, una de las dos medianoches se corre una hora y
+ * la division daria 6,96 dias donde hay 7.
+ */
+export function diasEntre(desde: string, hasta: string): number {
+  const ms = desdeFechaLocal(hasta).getTime() - desdeFechaLocal(desde).getTime();
+  return Math.round(ms / 86_400_000);
+}
+
+/**
+ * 'YYYY-MM-DD' mas N dias, otra vez en 'YYYY-MM-DD'. N puede ser negativo.
+ *
+ * Pasa por setDate() y no por sumar milisegundos: el constructor normaliza el
+ * desborde de mes y de anio solo, y no lo afecta ningun cambio de huso.
+ */
+export function sumarDias(fecha: string, dias: number): string {
+  const d = desdeFechaLocal(fecha);
+  d.setDate(d.getDate() + dias);
+  return aFechaLocal(d);
 }

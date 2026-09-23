@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Onboarding — Modo de Uso (Paso 3 de 5)</title>
+
+  <!-- Google Fonts: Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', '-apple-system', 'sans-serif'],
+          },
+          colors: {
+            // Paleta exacta y exclusiva del sistema de diseño
+            accion: '#243B8F',        // Azul marino principal
+            presionado: '#1B2C6A',    // Azul marino oscuro para feedback táctil
+            fondo: '#FAF6EC',         // Crema cálido base de pantalla
+            superficie: '#FFFFFF',    // Blanco para cards inactivas
+            acento: '#FFF0C9',        // Crema suave/dorado para card seleccionada
+            texto: '#1C1917',         // Texto principal oscuro
+            textoSec: '#57534E',      // Texto secundario
+            borde: '#F0EDE4',         // Bordes y segmentos inactivos
+          },
+          boxShadow: {
+            // Sombras tintadas cálidas exclusivamente: rgba(90, 70, 20, 0.07)
+            'calida-sm': '0 2px 8px 0 rgba(90, 70, 20, 0.07)',
+            'calida': '0 4px 16px 0 rgba(90, 70, 20, 0.07)',
+            'calida-lg': '0 10px 24px -2px rgba(90, 70, 20, 0.07)',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Reset táctil para sensación de aplicación móvil nativa */
+    * {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    input, textarea, button {
+      user-select: auto;
+    }
+    /* Scrollbar invisible para emular viewport móvil */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-[#1C1917]/10 flex items-center justify-center p-0 sm:p-4 md:p-6 antialiased font-sans">
+
+  <!-- =======================================================================
+       DISPOSITIVO MÓVIL (Contenedor ~390px, estilo nativo iOS / Android)
+       ======================================================================= -->
+  <main class="w-full max-w-[390px] h-[100dvh] sm:h-[844px] bg-[#FAF6EC] sm:rounded-[40px] sm:shadow-2xl overflow-hidden flex flex-col justify-between border-0 sm:border sm:border-[#F0EDE4] relative">
+
+    <!-- BARRA SUPERIOR: Header fijo con navegación y progreso -->
+    <header class="w-full px-5 pt-4 pb-2 bg-[#FAF6EC] z-10 flex-shrink-0">
+      
+      <!-- Fila de Navegación: Botón Volver y Paso -->
+      <div class="relative flex items-center justify-center h-11">
+        <!-- Botón Volver -->
+        <button
+          type="button"
+          aria-label="Volver al paso anterior"
+          class="absolute left-0 w-10 h-10 -ml-2 rounded-full flex items-center justify-center text-[#1C1917] active:bg-[#F0EDE4] transition-colors duration-150"
+          onclick="history.back()"
+        >
+          <svg class="w-6 h-6 stroke-[2.2]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+
+        <!-- Indicador de Paso Centrado -->
+        <span class="text-[12px] font-bold tracking-[0.14em] uppercase text-[#57534E]">
+          Paso 3 de 5
+        </span>
+      </div>
+
+      <!-- Barra de progreso de 5 segmentos (3 activos en #243B8F, 2 restantes en #F0EDE4) -->
+      <div class="grid grid-cols-5 gap-1.5 mt-2" role="progressbar" aria-valuenow="3" aria-valuemin="1" aria-valuemax="5" aria-label="Progreso del onboarding: paso 3 de 5">
+        <div class="h-[4px] rounded-full bg-[#243B8F] transition-all duration-300"></div>
+        <div class="h-[4px] rounded-full bg-[#243B8F] transition-all duration-300"></div>
+        <div class="h-[4px] rounded-full bg-[#243B8F] transition-all duration-300"></div>
+        <div class="h-[4px] rounded-full bg-[#F0EDE4] transition-all duration-300"></div>
+        <div class="h-[4px] rounded-full bg-[#F0EDE4] transition-all duration-300"></div>
+      </div>
+    </header>
+
+    <!-- CUERPO PRINCIPAL (Flujo natural sin huecos vacíos forzados) -->
+    <div class="flex-1 px-5 py-2 flex flex-col gap-3.5 overflow-hidden">
+      
+      <!-- BLOQUE EN FILA: León Mascota + Título y Bajada (~94px) -->
+      <section class="flex items-center gap-3.5 py-0.5 flex-shrink-0">
+        <img
+          src="imagenes/stitch_redise_o_ux_app_entrenamientos/screen.png"
+          onerror="this.src='imagenes/leon_coach.png'"
+          alt="Coach León"
+          class="w-[94px] h-[94px] object-contain flex-shrink-0 pointer-events-none select-none"
+        />
+        <div class="flex flex-col justify-center">
+          <h1 class="text-[22px] font-bold text-[#1C1917] leading-tight tracking-tight">
+            ¿Cómo querés usar la app?
+          </h1>
+          <p class="text-[13.5px] text-[#57534E] mt-0.5 leading-snug font-medium">
+            Podés cambiarlo después desde tu perfil.
+          </p>
+        </div>
+      </section>
+
+      <!-- GRUPO DE OPCIONES (Cards con proporción un poquito más compacta) -->
+      <section class="flex flex-col gap-2.5" role="radiogroup" aria-label="Modalidad de uso de la app">
+
+        <!-- ===================================================================
+             CARD A - "Con objetivo diario" (Preseleccionada por defecto)
+             =================================================================== -->
+        <article
+          id="card-a"
+          role="radio"
+          aria-checked="true"
+          tabindex="0"
+          onclick="seleccionarModo('a')"
+          onkeydown="manejarKeydown(event, 'a')"
+          class="group relative w-full cursor-pointer rounded-2xl p-3.5 transition-all duration-200 shadow-[0_4px_16px_0_rgba(90,70,20,0.07)]
+                 bg-[#FFF0C9] border-2 border-[#243B8F]"
+        >
+          <!-- Encabezado de la Card: Icono + Título + Radio Button -->
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5">
+              <!-- Icono Circular Progress / Pie Chart -->
+              <div class="w-7 h-7 rounded-full bg-[#FAF6EC] flex items-center justify-center text-[#243B8F] flex-shrink-0 border border-[#F0EDE4]">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
+                  <path d="M22 12A10 10 0 0 0 12 2v10z" fill="currentColor" fill-opacity="0.18" />
+                </svg>
+              </div>
+              <h2 class="text-[15px] font-bold text-[#1C1917] leading-snug">
+                Con objetivo diario
+              </h2>
+            </div>
+
+            <!-- Radio Button Custom -->
+            <div
+              id="radio-a"
+              class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-200
+                     bg-[#243B8F] border-2 border-[#243B8F]"
+            >
+              <div id="dot-a" class="w-2 h-2 rounded-full bg-[#FFFFFF] transition-transform duration-150 scale-100"></div>
+            </div>
+          </div>
+
+          <!-- Descripción -->
+          <p class="text-[12.5px] text-[#57534E] leading-relaxed mt-1 font-normal">
+            Te calculamos cuántas calorías y macros necesitás según tu peso, altura y objetivo. Vas a ver cuánto te falta cada día.
+          </p>
+
+          <!-- Separador Fino -->
+          <div class="my-2 border-t border-[#F0EDE4]"></div>
+
+          <!-- Sección INCLUYE -->
+          <div class="space-y-1">
+            <span class="block text-[10.5px] font-bold tracking-[0.08em] uppercase text-[#57534E]">
+              INCLUYE:
+            </span>
+
+            <ul class="space-y-0.5">
+              <li class="flex items-center gap-2 text-[12.5px] text-[#1C1917]">
+                <svg class="w-3.5 h-3.5 text-[#243B8F] flex-shrink-0 stroke-[2.6]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>Cálculo personalizado de calorías y macros</span>
+              </li>
+              <li class="flex items-center gap-2 text-[12.5px] text-[#1C1917]">
+                <svg class="w-3.5 h-3.5 text-[#243B8F] flex-shrink-0 stroke-[2.6]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>Barra de progreso diario</span>
+              </li>
+              <li class="flex items-center gap-2 text-[12.5px] text-[#1C1917]">
+                <svg class="w-3.5 h-3.5 text-[#243B8F] flex-shrink-0 stroke-[2.6]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>Seguimiento de objetivo de peso</span>
+              </li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ===================================================================
+             CARD B - "Solo un recuento"
+             =================================================================== -->
+        <article
+          id="card-b"
+          role="radio"
+          aria-checked="false"
+          tabindex="0"
+          onclick="seleccionarModo('b')"
+          onkeydown="manejarKeydown(event, 'b')"
+          class="group relative w-full cursor-pointer rounded-2xl p-3.5 transition-all duration-200 shadow-[0_4px_16px_0_rgba(90,70,20,0.07)]
+                 bg-[#FFFFFF] border border-[#F0EDE4]"
+        >
+          <!-- Encabezado de la Card: Icono + Título + Radio Button -->
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5">
+              <!-- Icono Clipboard / Lista -->
+              <div class="w-7 h-7 rounded-full bg-[#FAF6EC] flex items-center justify-center text-[#243B8F] flex-shrink-0 border border-[#F0EDE4]">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                  <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+                  <path d="M9 11h6" />
+                  <path d="M9 15h4" />
+                </svg>
+              </div>
+              <h2 class="text-[15px] font-bold text-[#1C1917] leading-snug">
+                Solo un recuento
+              </h2>
+            </div>
+
+            <!-- Radio Button Custom -->
+            <div
+              id="radio-b"
+              class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-200
+                     bg-[#FFFFFF] border border-[#F0EDE4]"
+            >
+              <div id="dot-b" class="w-2 h-2 rounded-full bg-transparent transition-transform duration-150 scale-0"></div>
+            </div>
+          </div>
+
+          <!-- Descripción -->
+          <p class="text-[12.5px] text-[#57534E] leading-relaxed mt-1 font-normal">
+            Registrás lo que comés y entrenás, sin metas numéricas. Vas a ver un resumen de tus hábitos, sin objetivo que cumplir.
+          </p>
+
+          <!-- Separador Fino -->
+          <div class="my-2 border-t border-[#F0EDE4]"></div>
+
+          <!-- Sección INCLUYE -->
+          <div class="space-y-1">
+            <span class="block text-[10.5px] font-bold tracking-[0.08em] uppercase text-[#57534E]">
+              INCLUYE:
+            </span>
+
+            <ul class="space-y-0.5">
+              <li class="flex items-center gap-2 text-[12.5px] text-[#1C1917]">
+                <svg class="w-3.5 h-3.5 text-[#243B8F] flex-shrink-0 stroke-[2.6]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>Registro libre de comidas y entrenamientos</span>
+              </li>
+              <li class="flex items-center gap-2 text-[12.5px] text-[#1C1917]">
+                <svg class="w-3.5 h-3.5 text-[#243B8F] flex-shrink-0 stroke-[2.6]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>Resumen de hábitos, sin barras de cumplimiento</span>
+              </li>
+              <li class="flex items-center gap-2 text-[12.5px] text-[#1C1917]">
+                <svg class="w-3.5 h-3.5 text-[#243B8F] flex-shrink-0 stroke-[2.6]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>Menos preguntas para empezar</span>
+              </li>
+            </ul>
+          </div>
+        </article>
+
+      </section>
+    </div>
+
+    <!-- =======================================================================
+         FOOTER: Botón Continuar (Ancho completo, 52px alto, flecha derecha con respiro)
+         ======================================================================= -->
+    <footer class="w-full px-5 pb-7 pt-2 bg-[#FAF6EC] flex-shrink-0">
+      <button
+        id="btn-continuar"
+        type="button"
+        onclick="continuar()"
+        class="w-full h-[52px] rounded-2xl font-bold text-[16px] text-[#FFFFFF] flex items-center justify-center gap-2 transition-all duration-200 shadow-[0_4px_16px_0_rgba(90,70,20,0.07)]
+               bg-[#243B8F] active:bg-[#1B2C6A] cursor-pointer opacity-100"
+      >
+        <span>Continuar</span>
+        <svg class="w-5 h-5 stroke-[2.4]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+          <polyline points="12 5 19 12 12 19"></polyline>
+        </svg>
+      </button>
+    </footer>
+
+  </main>
+
+  <!-- =======================================================================
+       LÓGICA DE INTERACCIÓN NATIVA (Vanilla JS para testing autónomo)
+       ======================================================================= -->
+  <script>
+    // Estado inicial: 'a' seleccionada por defecto (como pide el requerimiento 5)
+    let modoSeleccionado = 'a';
+
+    const cardA = document.getElementById('card-a');
+    const cardB = document.getElementById('card-b');
+    const radioA = document.getElementById('radio-a');
+    const radioB = document.getElementById('radio-b');
+    const dotA = document.getElementById('dot-a');
+    const dotB = document.getElementById('dot-b');
+    const btnContinuar = document.getElementById('btn-continuar');
+
+    function actualizarInterfaz() {
+      // Estado de Card A
+      if (modoSeleccionado === 'a') {
+        cardA.className = "group relative w-full cursor-pointer rounded-2xl p-4 transition-all duration-200 shadow-[0_4px_16px_0_rgba(90,70,20,0.07)] bg-[#FFF0C9] border-2 border-[#243B8F]";
+        cardA.setAttribute('aria-checked', 'true');
+        radioA.className = "w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 transition-all duration-200 bg-[#243B8F] border-2 border-[#243B8F]";
+        dotA.className = "w-2 h-2 rounded-full bg-[#FFFFFF] transition-transform duration-150 scale-100";
+      } else {
+        cardA.className = "group relative w-full cursor-pointer rounded-2xl p-4 transition-all duration-200 shadow-[0_4px_16px_0_rgba(90,70,20,0.07)] bg-[#FFFFFF] border border-[#F0EDE4]";
+        cardA.setAttribute('aria-checked', 'false');
+        radioA.className = "w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 transition-all duration-200 bg-[#FFFFFF] border border-[#F0EDE4]";
+        dotA.className = "w-2 h-2 rounded-full bg-transparent transition-transform duration-150 scale-0";
+      }
+
+      // Estado de Card B
+      if (modoSeleccionado === 'b') {
+        cardB.className = "group relative w-full cursor-pointer rounded-2xl p-4 transition-all duration-200 shadow-[0_4px_16px_0_rgba(90,70,20,0.07)] bg-[#FFF0C9] border-2 border-[#243B8F]";
+        cardB.setAttribute('aria-checked', 'true');
+        radioB.className = "w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 transition-all duration-200 bg-[#243B8F] border-2 border-[#243B8F]";
+        dotB.className = "w-2 h-2 rounded-full bg-[#FFFFFF] transition-transform duration-150 scale-100";
+      } else {
+        cardB.className = "group relative w-full cursor-pointer rounded-2xl p-4 transition-all duration-200 shadow-[0_4px_16px_0_rgba(90,70,20,0.07)] bg-[#FFFFFF] border border-[#F0EDE4]";
+        cardB.setAttribute('aria-checked', 'false');
+        radioB.className = "w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 transition-all duration-200 bg-[#FFFFFF] border border-[#F0EDE4]";
+        dotB.className = "w-2 h-2 rounded-full bg-transparent transition-transform duration-150 scale-0";
+      }
+
+      // Estado del Botón Continuar (Habilitado vs Deshabilitado)
+      if (modoSeleccionado) {
+        btnContinuar.disabled = false;
+        btnContinuar.className = "w-full h-[54px] rounded-2xl font-bold text-[16px] text-[#FFFFFF] flex items-center justify-center gap-2 transition-all duration-200 shadow-[0_4px_16px_0_rgba(90,70,20,0.07)] bg-[#243B8F] active:bg-[#1B2C6A] cursor-pointer opacity-100";
+      } else {
+        btnContinuar.disabled = true;
+        btnContinuar.className = "w-full h-[54px] rounded-2xl font-bold text-[16px] text-[#FFFFFF] flex items-center justify-center gap-2 transition-all duration-200 bg-[#243B8F] opacity-40 cursor-not-allowed pointer-events-none";
+      }
+    }
+
+    function seleccionarModo(modo) {
+      modoSeleccionado = modo;
+      actualizarInterfaz();
+    }
+
+    function manejarKeydown(event, modo) {
+      if (event.key === ' ' || event.key === 'Enter') {
+        event.preventDefault();
+        seleccionarModo(modo);
+      }
+    }
+
+    function continuar() {
+      if (!modoSeleccionado) return;
+      const modoTexto = modoSeleccionado === 'a' ? 'Con objetivo diario' : 'Solo un recuento';
+      console.log('Modo seleccionado para onboarding:', modoTexto);
+      // Navegación al siguiente paso (Paso 4 de 5)
+    }
+
+    // Inicializar interfaz en el arranque
+    actualizarInterfaz();
+  </script>
+</body>
+</html>

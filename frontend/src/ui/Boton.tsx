@@ -1,5 +1,6 @@
 import { Pressable, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import type { PressableProps, ViewStyle, TextStyle } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fontSize, fontWeight, sizes } from './theme';
 
 type Variante = 'primario' | 'secundario' | 'fantasma';
@@ -9,6 +10,12 @@ type Props = Omit<PressableProps, 'style'> & {
   variante?: Variante;
   cargando?: boolean;
   ancho?: boolean;
+  /**
+   * Icono opcional a la izquierda del texto. Toma el color de la variante,
+   * asi que no hay forma de pintarlo distinto al titulo y desalinearlo del
+   * resto. Decorativo: lo que anuncia el boton es `titulo`.
+   */
+  icono?: keyof typeof Ionicons.glyphMap;
 };
 
 // Mapa de variantes: cuando llegue la cuarta, agregas una entrada.
@@ -43,6 +50,7 @@ export function Boton({
   variante = 'primario',
   cargando = false,
   ancho = false,
+  icono,
   disabled,
   ...props
 }: Props) {
@@ -68,9 +76,20 @@ export function Boton({
       {cargando ? (
         <ActivityIndicator color={v.texto.color} />
       ) : (
-        // El texto NO hereda estilos del contenedor.
-        // Si el color va solo en el Pressable, no pasa nada.
-        <Text style={[estilos.texto, v.texto]}>{titulo}</Text>
+        <>
+          {icono && (
+            <Ionicons
+              name={icono}
+              size={sizes.iconSmall}
+              color={v.texto.color}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+            />
+          )}
+          {/* El texto NO hereda estilos del contenedor.
+              Si el color va solo en el Pressable, no pasa nada. */}
+          <Text style={[estilos.texto, v.texto]}>{titulo}</Text>
+        </>
       )}
     </Pressable>
   );

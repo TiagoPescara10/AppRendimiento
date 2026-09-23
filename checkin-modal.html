@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Avanza — Check-in Diario</title>
+  <!-- Google Fonts: Plus Jakarta Sans & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Plus Jakarta Sans', 'Inter', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            avanza: {
+              lienzo: '#FAF6EC',      // palette.cream50 (fondo oficial app)
+              card: '#FFFFFF',        // palette.white (superficie)
+              cremaAlt: '#F5EFE0',    // palette.cream100 / surfaceAlt
+              borde: '#F0EDE4',       // palette.cream200 (bordes cálidos)
+              bordeFuerte: '#E3DED0', // palette.cream300
+              texto: '#1C1917',       // palette.stone900 (textPrimary)
+              textoSec: '#57534E',    // palette.stone600 (textSecondary)
+              marino: '#243B8F',      // palette.navy700 (colors.action)
+              marinoDark: '#1B2C6A',  // palette.navy800 (colors.actionPressed)
+              marinoDeep: '#152251',  // palette.navy900 (camaraFondo / overlay base)
+              leonFondo: '#1E2D4A',
+              leonBorde: '#D9A86C',
+            }
+          },
+          boxShadow: {
+            'sheet': '0 12px 36px -4px rgba(21, 34, 81, 0.22), 0 4px 14px -2px rgba(90, 70, 20, 0.08)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+      background-color: #121620;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 antialiased selection:bg-avanza-marino selection:text-white">
+
+  <!-- =======================================================================
+       DISPOSITIVO MÓVIL (Simulación Viewport 390px x 844px estilo iPhone 14)
+       ======================================================================= -->
+  <main class="relative w-full max-w-[390px] h-[844px] bg-avanza-lienzo rounded-[44px] shadow-2xl overflow-hidden border-[6px] border-[#2C344A] flex flex-col justify-between">
+    
+    <!-- Notch / Dynamic Island decorativo -->
+    <header class="absolute top-0 inset-x-0 h-11 flex items-center justify-between px-7 z-20 pointer-events-none">
+      <span class="text-[13px] font-semibold text-avanza-texto">09:41</span>
+      <div class="w-24 h-5 bg-black rounded-full mx-auto"></div>
+      <div class="flex items-center space-x-1.5 text-avanza-texto">
+        <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L12 22l7.03-4.39C20.26 16.07 21 14.12 21 12c0-4.97-4.03-9-9-9z"/></svg>
+        <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M2 17h20v2H2zm1.15-4.05L4 11.97l6.83 2.05-1.92-1.92 7.07-7.07 2.83 2.83-7.07 7.07 1.92 1.92-2.05.85z"/></svg>
+        <div class="w-5 h-2.5 border border-current rounded-sm p-0.5 flex items-center">
+          <div class="w-full h-full bg-current rounded-2xs"></div>
+        </div>
+      </div>
+    </header>
+
+    <!-- =======================================================================
+         DASHBOARD DE FONDO DE AVANZA (Visible sutilmente tras el overlay)
+         ======================================================================= -->
+    <section class="flex-1 px-5 pt-14 pb-6 space-y-4 select-none opacity-80" aria-hidden="true">
+      <!-- Saludo y Mascota Avatar -->
+      <div class="flex items-center gap-3 pt-2">
+        <div class="w-12 h-12 rounded-full bg-avanza-leonFondo border-2 border-avanza-leonBorde flex items-center justify-center shadow-sm overflow-hidden flex-shrink-0">
+          <img src="imagenes/leon_coach.png" alt="Coach Avatar" class="w-10 h-10 object-contain" />
+        </div>
+        <div>
+          <h1 class="text-base font-bold text-avanza-texto">Buen día, Tiago</h1>
+          <p class="text-xs text-avanza-textoSec">miércoles, 16 de septiembre</p>
+        </div>
+      </div>
+
+      <!-- Card Consejo León -->
+      <div class="bg-avanza-card rounded-2xl p-4 shadow-sm border-l-4 border-avanza-marino space-y-1">
+        <p class="text-xs uppercase font-bold text-avanza-marino tracking-wide">Coach León • Recomendación</p>
+        <p class="text-sm text-avanza-texto">Hoy te toca sesión de tren superior. ¡Mantené la consistencia en press de banca!</p>
+      </div>
+
+      <!-- Métricas nutricionales / Kcal restantes -->
+      <div class="bg-avanza-card rounded-3xl p-5 shadow-sm space-y-3">
+        <div class="flex justify-between items-baseline">
+          <span class="text-xs font-semibold text-avanza-textoSec uppercase tracking-wider">Calorías restantes</span>
+          <span class="text-2xl font-extrabold text-avanza-texto">1.450 <span class="text-xs font-medium text-avanza-textoSec">kcal</span></span>
+        </div>
+        <div class="grid grid-cols-3 gap-2 pt-2 text-center text-xs border-t border-avanza-borde">
+          <div class="p-2 rounded-xl bg-avanza-cremaAlt">
+            <span class="block text-avanza-textoSec text-[11px]">Proteínas</span>
+            <span class="font-bold text-avanza-texto">120g</span>
+          </div>
+          <div class="p-2 rounded-xl bg-avanza-cremaAlt">
+            <span class="block text-avanza-textoSec text-[11px]">Carbos</span>
+            <span class="font-bold text-avanza-texto">180g</span>
+          </div>
+          <div class="p-2 rounded-xl bg-avanza-cremaAlt">
+            <span class="block text-avanza-textoSec text-[11px]">Grasas</span>
+            <span class="font-bold text-avanza-texto">45g</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card Hidratación -->
+      <div class="bg-avanza-card rounded-2xl p-4 shadow-sm flex items-center justify-between">
+        <div>
+          <span class="text-xs font-semibold text-avanza-textoSec block">Hidratación</span>
+          <span class="text-base font-bold text-avanza-texto">1.750 / 2.500 ml</span>
+        </div>
+        <div class="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs">
+          70%
+        </div>
+      </div>
+    </section>
+
+    <!-- Barra de pestañas inferior (Navegación simulada) -->
+    <nav class="h-16 bg-avanza-card border-t border-avanza-borde flex items-center justify-around px-2 text-avanza-textoSec pointer-events-none" aria-hidden="true">
+      <div class="flex flex-col items-center gap-0.5 text-avanza-marino font-semibold text-[11px]">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/></svg>
+        <span>Hoy</span>
+      </div>
+      <div class="flex flex-col items-center gap-0.5 text-[11px]">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+        <span>Entrenar</span>
+      </div>
+      <div class="flex flex-col items-center gap-0.5 text-[11px]">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        <span>Progreso</span>
+      </div>
+      <div class="flex flex-col items-center gap-0.5 text-[11px]">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+        <span>Perfil</span>
+      </div>
+    </nav>
+
+    <!-- =======================================================================
+         MODAL EMERGENTE DE CONFIRMACIÓN RÁPIDA ("CHECK-IN DIARIO")
+         ======================================================================= -->
+    <div id="modal-backdrop" class="absolute inset-0 z-30 bg-avanza-marinoDeep/70 backdrop-blur-sm flex items-center justify-center p-5 transition-opacity duration-300">
+      
+      <!-- Tarjeta Central Flotante (Modal Dialog) -->
+      <div 
+        role="dialog" 
+        aria-modal="true" 
+        aria-labelledby="modal-titulo"
+        class="relative w-full max-w-[348px] bg-avanza-card rounded-[28px] px-6 pt-7 pb-6 shadow-sheet flex flex-col items-center animate-in fade-in zoom-in-95 duration-200"
+      >
+        <!-- Botón circular de cierre (✕) en esquina superior derecha -->
+        <button 
+          id="btn-close" 
+          type="button"
+          aria-label="Cerrar modal"
+          class="absolute top-4 right-4 w-8 h-8 rounded-full bg-avanza-cremaAlt hover:bg-avanza-borde text-avanza-textoSec hover:text-avanza-texto flex items-center justify-center transition-colors focus:outline-none focus:ring-2 focus:ring-avanza-marino"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+
+        <!-- Ilustración Central: Mascota León Coach -->
+        <div class="w-36 h-36 flex items-center justify-center mb-3 select-none">
+          <img 
+            src="imagenes/leon_coach.png" 
+            alt="León Coach Avanza" 
+            class="max-w-full max-h-full object-contain drop-shadow-sm" 
+          />
+        </div>
+
+        <!-- Pregunta Principal (Título de fricción cero) -->
+        <h2 
+          id="modal-titulo" 
+          class="text-[21px] font-bold text-avanza-texto text-center leading-snug tracking-tight px-1"
+        >
+          ¿Fuiste a entrenamiento hoy?
+        </h2>
+
+        <!-- Fila de Acciones: 2 botones en grid horizontal -->
+        <div class="grid grid-cols-2 gap-3 mt-6 w-full">
+          <!-- Botón Izquierdo ("No") -->
+          <button 
+            id="btn-no" 
+            type="button" 
+            class="h-[52px] rounded-2xl bg-avanza-cremaAlt hover:bg-[#EAE2D0] active:scale-[0.98] border border-avanza-borde text-avanza-texto font-semibold text-base flex items-center justify-center transition-all focus:outline-none focus:ring-2 focus:ring-avanza-bordeFuerte"
+          >
+            No
+          </button>
+
+          <!-- Botón Derecho ("Sí") -->
+          <button 
+            id="btn-si" 
+            type="button" 
+            class="h-[52px] rounded-2xl bg-avanza-marino hover:bg-avanza-marinoDark active:scale-[0.98] text-white font-bold text-base flex items-center justify-center shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-avanza-marinoDark"
+          >
+            Sí
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Mensaje feedback toast flotante (Para probar interacción) -->
+    <div id="toast" class="hidden absolute bottom-20 inset-x-6 z-40 bg-avanza-marinoDeep text-white text-xs font-semibold py-3 px-4 rounded-xl shadow-lg flex items-center justify-between transition-all">
+      <span id="toast-text">Respuesta guardada</span>
+      <button onclick="reiniciarModal()" class="underline text-amber-200 ml-2">Reabrir modal</button>
+    </div>
+
+  </main>
+
+  <!-- Script interactivo de feedback visual -->
+  <script>
+    const backdrop = document.getElementById('modal-backdrop');
+    const toast = document.getElementById('toast');
+    const toastText = document.getElementById('toast-text');
+
+    function cerrar(respuesta) {
+      backdrop.classList.add('opacity-0', 'pointer-events-none');
+      toast.classList.remove('hidden');
+      if (respuesta === 'si') {
+        toastText.textContent = '¡Excelente! Entrenamiento registrado como completado.';
+      } else if (respuesta === 'no') {
+        toastText.textContent = 'Entendido. Descanso o ausencia guardada.';
+      } else {
+        toastText.textContent = 'Check-in pospuesto para más tarde.';
+      }
+    }
+
+    function reiniciarModal() {
+      toast.classList.add('hidden');
+      backdrop.classList.remove('opacity-0', 'pointer-events-none');
+    }
+
+    document.getElementById('btn-si').addEventListener('click', () => cerrar('si'));
+    document.getElementById('btn-no').addEventListener('click', () => cerrar('no'));
+    document.getElementById('btn-close').addEventListener('click', () => cerrar('despues'));
+  </script>
+</body>
+</html>

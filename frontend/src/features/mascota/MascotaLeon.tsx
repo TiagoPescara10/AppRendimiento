@@ -32,7 +32,7 @@ export function MascotaLeon({ consejo, nombreUsuario, fechaTexto }: Props) {
 
   return (
     <View style={estilos.contenedor}>
-      {/* 1. Encabezado: Avatar a la izquierda, Saludo y fecha al lado a la misma altura */}
+      {/* 1. Encabezado: Avatar a la izquierda, Saludo y fecha al lado, Boton Agenda a la derecha */}
       <View style={estilos.headerFila}>
         <View style={estilos.leonBadgeWrapper}>
           <Image
@@ -43,9 +43,26 @@ export function MascotaLeon({ consejo, nombreUsuario, fechaTexto }: Props) {
         </View>
 
         <View style={estilos.saludoColumna}>
-          <Text style={estilos.saludoTexto}>{saludoTexto}</Text>
-          <Text style={estilos.fechaTexto}>{fechaTexto}</Text>
+          <Text style={estilos.saludoTexto} numberOfLines={1}>
+            {saludoTexto}
+          </Text>
+          <Text style={estilos.fechaTexto} numberOfLines={1}>
+            {fechaTexto}
+          </Text>
         </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Abrir agenda"
+          style={({ pressed }) => [
+            estilos.botonAgenda,
+            pressed && estilos.botonAgendaPresionado,
+          ]}
+          onPress={() => router.push('/agenda')}
+        >
+          <Ionicons name="calendar-outline" size={15} color={colors.textPrimary} />
+          <Text style={estilos.botonAgendaTexto}>Agenda</Text>
+        </Pressable>
       </View>
 
       {/* 2. Abajo de eso: la recomendacion del leon con barra lateral de color */}
@@ -86,9 +103,9 @@ const estilos = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#1E2D4A',
+    backgroundColor: colors.avatarFondo,
     borderWidth: 2,
-    borderColor: '#D9A86C',
+    borderColor: colors.avatarBorde,
     alignItems: 'center',
     justifyContent: 'center',
     ...shadow.card,
@@ -99,6 +116,7 @@ const estilos = StyleSheet.create({
     borderRadius: 23,
   },
   saludoColumna: {
+    flex: 1,
     justifyContent: 'center',
     gap: 2,
   },
@@ -111,6 +129,27 @@ const estilos = StyleSheet.create({
   fechaTexto: {
     fontSize: fontSize.caption,
     color: colors.textSecondary,
+  },
+  botonAgenda: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.surface,
+    paddingVertical: 7,
+    paddingHorizontal: spacing.sm + 2,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  botonAgendaPresionado: {
+    opacity: 0.7,
+    backgroundColor: colors.surfaceAlt,
+  },
+  botonAgendaTexto: {
+    fontSize: fontSize.caption,
+    fontWeight: fontWeight.medium,
+    color: colors.textPrimary,
   },
   card: {
     backgroundColor: colors.accentSoft,

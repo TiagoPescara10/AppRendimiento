@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 import type { PorcionTipica } from '@/db/schema';
+import { resolverPorcionesAlimento } from '../porciones';
 
 const MULTIPLICADOR_MAX = 20;
 const GRAMOS_MAX = 5000;
@@ -28,6 +29,8 @@ export type DatosSheet = {
   nombre: string;
   kcal_por_100g: number;
   porciones: PorcionTipica[];
+  /** Categoria opcional para fallback de porciones al vuelo */
+  categoria?: string | null;
   /** Gramos actuales si se esta editando; undefined si se esta agregando. */
   cantidadActual?: number;
   /** Si viene, el sheet muestra la opcion de quitar. */
@@ -55,6 +58,7 @@ export function SheetPorciones({
 
   if (!datos) return null;
 
+  const porcionesEfectivas = resolverPorcionesAlimento(datos);
   const kcalDe = (g: number) => Math.round((datos.kcal_por_100g * g) / 100);
 
   const confirmarGramos = () => {
@@ -83,7 +87,7 @@ export function SheetPorciones({
           <Text style={estilos.detalle}>¿Cuánto comiste?</Text>
 
           {/* Multiplicador. Solo tiene sentido si hay porciones que multiplicar. */}
-          {datos.porciones.length > 0 && (
+          {porcionesEfectivas.length > 0 && (
             <View style={estilos.multiFila}>
               <Text style={estilos.detalle}>Cantidad</Text>
               <View style={estilos.multiControles}>
@@ -104,7 +108,7 @@ export function SheetPorciones({
             </View>
           )}
 
-          {datos.porciones.map((p) => {
+          {porcionesEfectivas.map((p) => {
             const gramosTotal = p.gramos * multiplicador;
             const seleccionada = datos.cantidadActual === gramosTotal;
             const etiqueta = multiplicador === 1 ? p.nombre : `${multiplicador} × ${p.nombre}`;

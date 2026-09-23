@@ -207,6 +207,11 @@ prueba('la fase abierta nunca termina, por lejos que se mire', () => {
 prueba('el cronometro no muestra linea de bloque ni de pasada', () => {
   const plan = T.construirPlan(T.CONFIG_CRONOMETRO);
   igual(T.etiquetaProgreso(plan[0], T.CONFIG_CRONOMETRO), '', 'etiqueta vacia');
+
+  // Incluso si la config viene con pasadas o bloques residuales pero trabajoSeg = 0:
+  const configSucia = { bloques: 6, pasadas: 8, trabajoSeg: 0, descansoSeg: 20, descansoBloqueSeg: 90 };
+  const planSucio = T.construirPlan(configSucia);
+  igual(T.etiquetaProgreso(planSucio[0], configSucia), '', 'etiqueta vacia con config sucia');
 });
 
 // --- posicion --------------------------------------------------------------
