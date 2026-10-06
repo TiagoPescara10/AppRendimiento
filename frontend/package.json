@@ -65,6 +65,7 @@
     "test:avisos": "node scripts/probar-avisos.mjs",
     "test:foto": "node scripts/probar-foto.mjs",
     "test:permisos": "node scripts/probar-permisos.mjs",
+    "test:escaneo": "node scripts/probar-escaneo.mjs",
     "test:fuerza": "node scripts/probar-fuerza.mjs",
     "test:validacion": "node scripts/probar-validacion.mjs",
     "test:seed": "node scripts/probar-seed-desarrollo.mjs",
