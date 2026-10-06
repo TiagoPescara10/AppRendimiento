@@ -2689,21 +2689,34 @@ await prueba('la 013 sobre una base con rutina_gimnasio_dia: migra a rutina y pr
     [t, t],
   );
 
-  // Simular evento duplicado en fecha futura (2026-10-05 cae lunes):
+  // Fechas futuras relativas a hoy y no fijas: la 013 compara contra
+  // datetime('now'), asi que una fecha fija deja de ser futura con el tiempo
+  // y la prueba se rompe sola. Lunes y miercoles porque son los dias de rg-13.
+  const p2 = (n) => String(n).padStart(2, '0');
+  const diaLocal = (d) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+  const lunesFuturo = new Date();
+  lunesFuturo.setDate(lunesFuturo.getDate() + 30);
+  while (lunesFuturo.getDay() !== 1) lunesFuturo.setDate(lunesFuturo.getDate() + 1);
+  const miercolesFuturo = new Date(lunesFuturo);
+  miercolesFuturo.setDate(miercolesFuturo.getDate() + 2);
+  const lunes = `${diaLocal(lunesFuturo)}T10:00:00-03:00`;
+  const miercoles = `${diaLocal(miercolesFuturo)}T10:00:00-03:00`;
+
+  // Simular evento duplicado en un lunes futuro:
   // e1: evento huerfano sin rutina_id, no completado
   // e2: evento con rutina_id
   // e3: evento huerfano COMPLETADO (NO debe borrarse jamas)
   await db.runAsync(
-    "INSERT INTO evento (id, usuario_id, tipo, intensidad, fecha_hora_inicio, completado, respondido, rutina_gimnasio_id, created_at, updated_at) VALUES ('ev-fut-dup-huerfano', 'u-mig-13', 'gimnasio', 'media', '2026-10-05T10:00:00-03:00', 0, 0, 'rg-13', ?, ?)",
-    [t, t],
+    "INSERT INTO evento (id, usuario_id, tipo, intensidad, fecha_hora_inicio, completado, respondido, rutina_gimnasio_id, created_at, updated_at) VALUES ('ev-fut-dup-huerfano', 'u-mig-13', 'gimnasio', 'media', ?, 0, 0, 'rg-13', ?, ?)",
+    [lunes, t, t],
   );
   await db.runAsync(
-    "INSERT INTO evento (id, usuario_id, tipo, intensidad, fecha_hora_inicio, completado, respondido, rutina_gimnasio_id, rutina_id, created_at, updated_at) VALUES ('ev-fut-dup-bueno', 'u-mig-13', 'gimnasio', 'media', '2026-10-05T10:00:00-03:00', 0, 0, 'rg-13', 'ru-previa-13', ?, ?)",
-    [t, t],
+    "INSERT INTO evento (id, usuario_id, tipo, intensidad, fecha_hora_inicio, completado, respondido, rutina_gimnasio_id, rutina_id, created_at, updated_at) VALUES ('ev-fut-dup-bueno', 'u-mig-13', 'gimnasio', 'media', ?, 0, 0, 'rg-13', 'ru-previa-13', ?, ?)",
+    [lunes, t, t],
   );
   await db.runAsync(
-    "INSERT INTO evento (id, usuario_id, tipo, intensidad, fecha_hora_inicio, completado, respondido, rutina_gimnasio_id, created_at, updated_at) VALUES ('ev-fut-completado', 'u-mig-13', 'gimnasio', 'media', '2026-10-07T10:00:00-03:00', 1, 1, 'rg-13', ?, ?)",
-    [t, t],
+    "INSERT INTO evento (id, usuario_id, tipo, intensidad, fecha_hora_inicio, completado, respondido, rutina_gimnasio_id, created_at, updated_at) VALUES ('ev-fut-completado', 'u-mig-13', 'gimnasio', 'media', ?, 1, 1, 'rg-13', ?, ?)",
+    [miercoles, t, t],
   );
 
   // Aplicar migracion 13
