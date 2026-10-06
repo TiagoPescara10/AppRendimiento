@@ -38,7 +38,28 @@
       "expo-sqlite",
       "@react-native-community/datetimepicker",
       "expo-image",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "La cámara se usa para sacar la foto de fondo de la imagen que compartís de tu entrenamiento.",
+          "photosPermission": "La galería se usa para elegir la foto de fondo de la imagen que compartís de tu entrenamiento."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Se usa para guardar en tu galería la imagen de tu entrenamiento."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "La ubicación se usa para medir los km mientras corrés, caminás o andás en bici con el cronómetro."
+        }
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,
