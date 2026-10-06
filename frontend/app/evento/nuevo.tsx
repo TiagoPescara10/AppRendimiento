@@ -20,6 +20,7 @@ import { etiquetaTipo, capitalizarDeporte } from '@/features/agenda/formato';
 import type { TipoEvento, Intensidad } from '@/db/schema';
 import { randomUUID } from '@/db/sync/uuid';
 import { aISOLocal } from '@/lib/fechas';
+import { pedirPermisoAvisosSiCorresponde } from '@/features/avisos/permiso';
 
 // ---------------------------------------------------------------------------
 // Constantes y helpers
@@ -321,6 +322,8 @@ export default function NuevoEvento() {
         });
       }
 
+      // La primera vez explica los avisos y pide el permiso. No tira.
+      await pedirPermisoAvisosSiCorresponde(perfil.id);
       router.back();
     } catch (e) {
       console.error('Error al guardar:', e);

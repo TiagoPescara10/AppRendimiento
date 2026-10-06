@@ -4,6 +4,7 @@
 // devuelve el proximo evento y sus datos.
 
 import { getDb } from '../schema';
+import { avisarCambio } from '../cambios';
 import type { EventoRow, Intensidad, ModoEntrenamiento, TipoEvento } from '../schema';
 
 const ahora = (): string => new Date().toISOString();
@@ -63,6 +64,7 @@ export async function crearEvento(datos: NuevoEvento): Promise<EventoRow> {
       t,
     ],
   );
+  avisarCambio('eventos');
 
   const fila = await obtenerEvento(datos.id);
   if (!fila) throw new Error(`No se pudo leer el evento recien creado: ${datos.id}`);
@@ -211,6 +213,7 @@ export async function actualizarEvento(
     ahora(),
     id,
   ]);
+  avisarCambio('eventos');
 }
 
 /**
@@ -225,6 +228,7 @@ export async function marcarCompletado(id: string, completado: boolean): Promise
 
 export async function eliminarEvento(id: string): Promise<void> {
   await getDb().runAsync('DELETE FROM evento WHERE id = ?', [id]);
+  avisarCambio('eventos');
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +295,7 @@ export async function responderEvento(id: string, completado: boolean): Promise<
     'UPDATE evento SET completado = ?, respondido = 1, updated_at = ? WHERE id = ?',
     [completado ? 1 : 0, ahora(), id],
   );
+  avisarCambio('eventos');
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +340,7 @@ export async function eliminarEventosFuturosDeRutina(
     'DELETE FROM evento WHERE rutina_id = ? AND fecha_hora_inicio >= ?',
     [rutinaId, desde],
   );
+  if (r.changes > 0) avisarCambio('eventos');
   return r.changes;
 }
 
@@ -360,6 +366,7 @@ export async function eliminarEventosFuturosDeRutinaGimnasio(
     'DELETE FROM evento WHERE rutina_gimnasio_id = ? AND fecha_hora_inicio >= ?',
     [rutinaGimnasioId, desde],
   );
+  if (r.changes > 0) avisarCambio('eventos');
   return r.changes;
 }
 

@@ -423,6 +423,25 @@ export default function Perfil() {
 
         <View style={estilos.separador} />
 
+        {/* Avisos */}
+        <Pressable
+          style={estilos.opcionFila}
+          onPress={() => router.push('/perfil/avisos')}
+        >
+          <View style={estilos.opcionIzquierda}>
+            <Ionicons name="notifications-outline" size={sizes.iconSmall} color={colors.textSecondary} />
+            <Text style={estilos.opcionTexto}>Avisos</Text>
+          </View>
+          <View style={estilos.opcionDerecha}>
+            <Text style={estilos.opcionValor}>
+              {perfil.avisos_activos === 0 ? 'Apagados' : 'Activados'}
+            </Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </View>
+        </Pressable>
+
+        <View style={estilos.separador} />
+
         {/* Mis alimentos */}
         <Pressable style={estilos.opcionFila}>
           <View style={estilos.opcionIzquierda}>

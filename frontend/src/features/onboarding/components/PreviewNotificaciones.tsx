@@ -81,7 +81,7 @@ export function PreviewNotificaciones() {
           translucido sobre el degradado oscuro, o sea ilegible, y ademas le
           peleaba el lugar a la tercera notificacion. Aca es una aclaracion en
           gris sobre el crema, que es lo que es. */}
-      <Text style={estilos.nota}>Sale de tu peso, tu objetivo y lo que ya comiste hoy</Text>
+      <Text style={estilos.nota}>Sale de tu peso y de cuándo jugás.</Text>
     </View>
   );
 }

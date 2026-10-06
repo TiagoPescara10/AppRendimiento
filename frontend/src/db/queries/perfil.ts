@@ -5,6 +5,7 @@
 // src/lib/ o en features/perfil/, no aca.
 
 import { getDb } from '../schema';
+import { avisarCambio } from '../cambios';
 import type { PerfilRow } from '../schema';
 
 const ahora = (): string => new Date().toISOString();
@@ -38,6 +39,10 @@ const CAMPOS_EDITABLES = [
   'peso_objetivo_kg',
   'meta_agua_manual_ml',
   'modo_nutricion',
+  'avisos_activos',
+  'avisos_antes',
+  'avisos_despues',
+  'avisos_gimnasio',
 ] as const;
 
 type CampoEditable = (typeof CAMPOS_EDITABLES)[number];
@@ -101,6 +106,7 @@ export async function actualizarPerfil(id: string, cambios: CambiosPerfil): Prom
     ahora(),
     id,
   ]);
+  avisarCambio('perfil');
 }
 
 export async function eliminarPerfil(id: string): Promise<void> {

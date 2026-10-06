@@ -73,6 +73,11 @@ export interface PerfilRow {
   peso_objetivo_kg: number | null;
   meta_agua_manual_ml: number | null;
   modo_nutricion: ModoNutricion;
+  /** Preferencias de avisos (migracion 020). Ver src/features/avisos/. */
+  avisos_activos: Bool01;
+  avisos_antes: Bool01;
+  avisos_despues: Bool01;
+  avisos_gimnasio: Bool01;
   fecha_alta: string;
   created_at: string;
   updated_at: string;

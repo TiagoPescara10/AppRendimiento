@@ -4,6 +4,7 @@
 // reciente. El calculo de tendencia o media movil no vive aca.
 
 import { getDb } from '../schema';
+import { avisarCambio } from '../cambios';
 import type { FuentePeso, RegistroPesoRow } from '../schema';
 
 const ahora = (): string => new Date().toISOString();
@@ -24,6 +25,7 @@ export async function crearRegistroPeso(datos: NuevoRegistroPeso): Promise<Regis
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [datos.id, datos.usuario_id, datos.peso_kg, datos.fecha, datos.fuente, t, t],
   );
+  avisarCambio('peso');
 
   const fila = await obtenerRegistroPeso(datos.id);
   if (!fila) throw new Error(`No se pudo leer el registro de peso recien creado: ${datos.id}`);
@@ -95,8 +97,10 @@ export async function actualizarRegistroPeso(
     `UPDATE registro_peso SET ${campos.join(', ')}, updated_at = ? WHERE id = ?`,
     [...valores, ahora(), id],
   );
+  avisarCambio('peso');
 }
 
 export async function eliminarRegistroPeso(id: string): Promise<void> {
   await getDb().runAsync('DELETE FROM registro_peso WHERE id = ?', [id]);
+  avisarCambio('peso');
 }

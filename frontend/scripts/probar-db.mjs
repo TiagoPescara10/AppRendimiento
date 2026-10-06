@@ -2911,7 +2911,7 @@ await prueba('la 019 sobre una base v18: agrega las columnas y las sesiones viej
   );
 
   const v = await migrations.migrar(db);
-  igual(v, 19, 'queda en v19');
+  igual(v, migrations.VERSION_ESQUEMA, 'queda en la ultima');
   const fila = await db.getFirstAsync('SELECT * FROM sesion_entrenamiento WHERE id = ?', ['se-19']);
   igual(fila.distancia_km, 5, 'la distancia de antes sigue');
   igual(fila.actividad, null, 'actividad null');
@@ -2922,6 +2922,33 @@ await prueba('la 019 sobre una base v18: agrega las columnas y las sesiones viej
     () => db.runAsync("UPDATE sesion_entrenamiento SET actividad = 'otro' WHERE id = 'se-19'"),
     /CHECK/i, 'otro no entra');
   await db.runAsync("UPDATE sesion_entrenamiento SET actividad = 'bici', kcal_estimadas = 300 WHERE id = 'se-19'");
+  await db.closeAsync();
+});
+
+await prueba('la 020 sobre una base v19: el perfil queda con los avisos activados', async () => {
+  const db = await sqlite.openDatabaseAsync(join(tmp, 'v20-test.db'));
+  await db.execAsync('PRAGMA foreign_keys = ON;');
+  for (let v = 1; v <= 19; v++) {
+    await db.execAsync(migrations.migraciones.find((mig) => mig.version === v).sql);
+  }
+  await db.execAsync('PRAGMA user_version = 19');
+
+  const t = '2026-09-01T00:00:00.000Z';
+  await db.runAsync("INSERT INTO perfil (id, nombre, fecha_alta, created_at, updated_at) VALUES ('u-20', 'Ana', '2026-09-01', ?, ?)", [t, t]);
+
+  const v = await migrations.migrar(db);
+  igual(v, migrations.VERSION_ESQUEMA, 'queda en la ultima');
+  const fila = await db.getFirstAsync('SELECT * FROM perfil WHERE id = ?', ['u-20']);
+  igual(fila.nombre, 'Ana', 'el perfil de antes sigue');
+  igual(fila.avisos_activos, 1, 'activos');
+  igual(fila.avisos_antes, 1, 'antes');
+  igual(fila.avisos_despues, 1, 'despues');
+  igual(fila.avisos_gimnasio, 1, 'gimnasio');
+
+  await lanza(
+    () => db.runAsync("UPDATE perfil SET avisos_antes = 2 WHERE id = 'u-20'"),
+    /CHECK/i, '2 no entra');
+  await db.runAsync("UPDATE perfil SET avisos_gimnasio = 0 WHERE id = 'u-20'");
   await db.closeAsync();
 });
 
