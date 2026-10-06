@@ -50,7 +50,20 @@ import { aFechaLocal, diasEntre } from '@/lib/fechas';
 import type { EventoRow, TipoEvento, Intensidad } from '@/db/schema';
 
 const LETRAS_DIAS = ['D', 'L', 'M', 'Mi', 'J', 'V', 'S'];
-const ORDEN_DOMINGO_PRIMERO = [0, 1, 2, 3, 4, 5, 6];
+const ORDEN_LUNES_PRIMERO = [1, 2, 3, 4, 5, 6, 0];
+
+const posicionDia = (dia: number) => ORDEN_LUNES_PRIMERO.indexOf(dia);
+
+// Ordena las rutinas segun su primer dia de la semana (lunes primero).
+// Las que no tienen dias asignados van al final; a igual dia, desempata la hora.
+function ordenarRutinasPorSemana(rutinas: RutinaGimnasioConDetalle[]) {
+  const primerDia = (r: RutinaGimnasioConDetalle) =>
+    r.dias && r.dias.length > 0 ? Math.min(...r.dias.map(posicionDia)) : Infinity;
+  return [...rutinas].sort(
+    (a, b) =>
+      primerDia(a) - primerDia(b) || (a.hora ?? '99:99').localeCompare(b.hora ?? '99:99'),
+  );
+}
 
 type FiltroSesiones = 'hoy' | 'semana' | 'mes';
 
@@ -168,7 +181,7 @@ export default function EntrenamientosHub() {
         eventosDelDia.find((e) => e.id !== eventoRutinaComp?.id) ??
         null;
       setEventoHoy(otroEvento);
-      setMisRutinas(todasRutinas);
+      setMisRutinas(ordenarRutinasPorSemana(todasRutinas));
       setSesionesRecientes(recientes);
     } catch (err) {
       console.error('Error al cargar pantalla de entrenamientos:', err);
@@ -500,9 +513,7 @@ export default function EntrenamientosHub() {
           contentContainerStyle={estilos.scrollRutinas}
         >
           {misRutinas.map((r) => {
-            const diasOrd = [...(r.dias ?? [])].sort(
-              (a, b) => ORDEN_DOMINGO_PRIMERO.indexOf(a) - ORDEN_DOMINGO_PRIMERO.indexOf(b),
-            );
+            const diasOrd = [...(r.dias ?? [])].sort((a, b) => posicionDia(a) - posicionDia(b));
 
             return (
               <Pressable
