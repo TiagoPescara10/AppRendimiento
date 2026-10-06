@@ -12,24 +12,37 @@
 // fase sale de comparar ese instante contra el plan. Por eso da igual que el
 // sistema congele los timers un rato: al volver, la cuenta ya esta donde
 // corresponde en vez de haber quedado atrasada.
+//
+// El cronometro libre es otro flujo arriba de lo mismo: la actividad se elige
+// antes de empezar, los km salen del GPS (features/entrenamiento/useGps.ts),
+// la pantalla en vivo es VistaCronometroLibre y al terminar va directo a la
+// tarjeta para compartir, sin pasar por "Listo".
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert, AppState } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert, AppState, ActivityIndicator } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
 import { Card } from '@/ui/Card';
-import { Input } from '@/ui/Input';
 import { colors, spacing, radius, fontSize, lineHeight, fontWeight, sizes } from '@/ui/theme';
 
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
-import { actualizarDistancia } from '@/db/queries/sesiones';
+import { ultimaActividadCronometro } from '@/db/queries/sesiones';
+import { ultimoPeso } from '@/db/queries/peso';
+import { ACTIVIDADES, estimarKcal } from '@/lib/gasto';
+import type { Actividad } from '@/lib/gasto';
 import { guardarSesionTerminada } from '@/features/entrenamiento/guardarSesion';
+import { useGps } from '@/features/entrenamiento/useGps';
+import { gpsParcial, minutoInicioGps, senalGps } from '@/features/entrenamiento/gps';
 import { FilaNumero } from '@/features/entrenamiento/components/FilaNumero';
 import { Anillo } from '@/features/entrenamiento/components/Anillo';
 import { VistaPrevia } from '@/features/entrenamiento/components/VistaPrevia';
+import { VistaCronometroLibre } from '@/features/entrenamiento/components/VistaCronometroLibre';
+import { cargarNivel } from '@/features/nivel/api';
+import type { DatosNivel } from '@/features/nivel/api';
+import { GananciaXP } from '@/features/nivel/components/GananciaXP';
 import {
   CONFIG_CRONOMETRO,
   CONFIG_POR_DEFECTO,
@@ -37,15 +50,12 @@ import {
   PRESETS,
   presetActivo,
   ajustarConfig,
-  calcularRitmo,
   construirPlan,
   duracionTotalMs,
   esCronometro,
   estaPausado,
-  formatearDecimal,
   formatearSegundos,
   iniciarReloj,
-  parsearDistancia,
   pausarReloj,
   posicionEn,
   reanudarReloj,
@@ -87,6 +97,12 @@ const GRACIA_PITIDO_MS = 1500;
 
 const PASO_SEG = 5;
 
+const ETIQUETA_ACTIVIDAD: Record<Actividad, string> = {
+  correr: 'Correr',
+  caminar: 'Caminar',
+  bici: 'Bici',
+};
+
 const FONDO_FASE: Record<TipoFase, string> = {
   trabajo: colors.faseTrabajo,
   descanso: colors.faseDescanso,
@@ -115,10 +131,20 @@ export default function Temporizador() {
   const [finalizada, setFinalizada] = useState(false);
   const [totalFinalMs, setTotalFinalMs] = useState(0);
 
-  // Lo que queda de la sesion ya guardada. `sesionId` es null hasta que la
-  // escritura vuelve; la distancia se carga contra el despues.
-  const [sesionId, setSesionId] = useState<string | null>(null);
-  const [distanciaTexto, setDistanciaTexto] = useState('');
+  // Cronometro: que se hace y con que peso se estima el gasto. La actividad
+  // arranca en la de la ultima sesion que tenga una, o en correr: siempre hay
+  // una elegida. El peso es el del momento y queda guardado con las kcal.
+  const [actividad, setActividad] = useState<Actividad>('correr');
+  const [pesoKg, setPesoKg] = useState<number | null>(null);
+  // Si el usuario ya toco un chip, la ultima actividad que llega tarde de la
+  // base no se lo pisa.
+  const eligioActividad = useRef(false);
+  // El nivel ya con esta sesion sumada. null hasta que se guarda y se relee.
+  // Solo pasadas: el cronometro lo muestra en la pantalla de compartir.
+  const [nivel, setNivel] = useState<DatosNivel | null>(null);
+  // El cronometro no tiene "Listo": si guardar falla, queda en esa pantalla
+  // con el error en vez de ir a una tarjeta que no existe.
+  const [falloGuardar, setFalloGuardar] = useState(false);
 
   const cronometro = esCronometro(config);
   // Se recalcula en cada render en vez de guardarse: asi tocar un +/- desmarca
@@ -126,6 +152,32 @@ export default function Temporizador() {
   const activoId = presetActivo(config);
   const pausado = !!reloj && estaPausado(reloj);
   const corriendo = !!reloj && !finalizada;
+
+  const gps = useGps({
+    activo: corriendo && cronometro,
+    actividad,
+    sesionMs: () => (reloj ? transcurridoMs(reloj, Date.now()) : 0),
+  });
+
+  // --- lo que se precarga -------------------------------------------------
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const perfil = await obtenerPerfilLocal();
+      if (!perfil) return;
+      const [ultima, peso] = await Promise.all([
+        ultimaActividadCronometro(perfil.id).catch(() => null),
+        ultimoPeso(perfil.id).catch(() => null),
+      ]);
+      if (!vivo) return;
+      if (ultima && !eligioActividad.current) setActividad(ultima);
+      setPesoKg(peso?.peso_kg ?? null);
+    })().catch((e) => console.error('Error al precargar el cronometro:', e));
+    return () => {
+      vivo = false;
+    };
+  }, []);
 
   // --- el latido ----------------------------------------------------------
 
@@ -206,21 +258,62 @@ export default function Temporizador() {
           return;
         }
 
+        if (!esCronometro(config)) {
+          await guardarSesionTerminada({
+            usuarioId: perfil.id,
+            config,
+            plan,
+            inicio: new Date(reloj.inicioMs),
+            duracionRealMs,
+          });
+          // Se relee DESPUES de guardar: la XP se calcula de los eventos, y el
+          // de esta sesion recien ahora existe. Si falla, no se muestra y listo.
+          cargarNivel()
+            .then(setNivel)
+            .catch((e) => console.error('Error al cargar el nivel:', e));
+          return;
+        }
+
+        // Cronometro libre. Los km son los del GPS si llego a medir algo; si
+        // no, null, y la tarjeta los pide abierta. Las kcal se calculan aca
+        // con los valores finales, no con la ultima muestra de la pantalla.
+        // Se mira DESPUES de redondear: 4 m de GPS redondean a 0, y la base
+        // rechaza una distancia de 0 (CHECK), lo que tiraria la sesion entera.
+        const redondeado = Math.round(gps.estado.km * 100) / 100;
+        const distanciaKm = gps.estado.primerPuntoSesionMs !== null && redondeado > 0 ? redondeado : null;
+        const duracionSeg = Math.round(duracionRealMs / 1000);
+
         const r = await guardarSesionTerminada({
           usuarioId: perfil.id,
           config,
           plan,
           inicio: new Date(reloj.inicioMs),
           duracionRealMs,
+          cronometro: {
+            actividad,
+            distanciaKm,
+            kcal: estimarKcal({ actividad, duracionSeg, distanciaKm, pesoKg }),
+          },
         });
 
-        setSesionId(r.sesion.id);
+        // replace y no push: volver atras desde la tarjeta no tiene que caer
+        // en un cronometro ya terminado.
+        const minuto = gpsParcial(gps.estado) ? minutoInicioGps(gps.estado) : null;
+        router.replace({
+          pathname: '/evento/compartir',
+          params: {
+            id: r.eventoId,
+            desde: 'temporizador',
+            ...(minuto !== null && { gpsMinuto: String(minuto) }),
+          },
+        });
       } catch (e) {
         console.error('Error al guardar la sesion:', e);
+        setFalloGuardar(true);
         Alert.alert('Error', 'El entrenamiento terminó, pero no se pudo guardar.');
       }
     },
-    [config, plan, reloj],
+    [config, plan, reloj, gps.estado, actividad, pesoKg, router],
   );
 
   // Una sola escritura por sesion. En un ref y no en estado porque tiene que
@@ -257,8 +350,10 @@ export default function Temporizador() {
   }, [corriendo]);
 
   // Los players se liberan al salir de la pantalla, no al terminar la sesion:
-  // el pitido del final todavia tiene que sonar.
-  useEffect(() => () => liberarSonidos(), []);
+  // el pitido del final todavia tiene que sonar. Y un rato despues de salir,
+  // no en el acto: el cronometro sale a la tarjeta apenas guarda, que es antes
+  // de que termine el pitido.
+  useEffect(() => () => void setTimeout(liberarSonidos, 2000), []);
 
   // --- acciones -----------------------------------------------------------
 
@@ -281,6 +376,9 @@ export default function Temporizador() {
     }
 
     await prepararSonidos();
+    // El permiso de ubicacion se pide aca y no antes. El reloj arranca
+    // despues de la respuesta: el tiempo frente al cartel no es entrenamiento.
+    if (cronometro) await gps.iniciar();
 
     ultimoIndice.current = null;
     const t = Date.now();
@@ -295,6 +393,12 @@ export default function Temporizador() {
     const t = Date.now();
     setAhora(t);
     setReloj(pausado ? reanudarReloj(reloj, t) : pausarReloj(reloj, t));
+    if (cronometro) gps.marcarPausa(!pausado);
+  };
+
+  const elegirActividad = (a: Actividad) => {
+    eligioActividad.current = true;
+    setActividad(a);
   };
 
   /**
@@ -326,74 +430,35 @@ export default function Temporizador() {
     );
   };
 
-  /**
-   * Salir de la pantalla de "Listo". Antes de irse guarda la distancia, que es
-   * lo unico que todavia puede estar sin escribir.
-   *
-   * Va al salir y no en cada tecla: son los km de una sesion que ya esta
-   * guardada, no hay nada que perder si el usuario no llega a tocar el boton.
-   */
-  const volver = async () => {
-    const km = parsearDistancia(distanciaTexto);
-    if (sesionId && km !== null) {
-      try {
-        await actualizarDistancia(sesionId, km);
-      } catch (e) {
-        // No frena la vuelta: la sesion ya quedo guardada, esto era el extra.
-        console.error('Error al guardar la distancia:', e);
-      }
-    }
-    router.back();
-  };
-
   // -------------------------------------------------------------------------
   // Terminado
   // -------------------------------------------------------------------------
 
+  // El cronometro libre no tiene "Listo": mientras guarda, el mismo fondo y una
+  // ruedita, y enseguida la tarjeta. Si falla, cae al "Listo" de abajo.
+  if (finalizada && cronometro && !falloGuardar) {
+    return (
+      <Pantalla scroll={false} fondo={colors.faseTrabajo} style={estilos.centrada}>
+        <ActivityIndicator color={colors.textOnFase} />
+      </Pantalla>
+    );
+  }
+
   if (finalizada) {
     const minutos = Math.max(1, Math.round(totalFinalMs / 60000));
 
-    // null mientras el campo este vacio o tenga cualquier cosa. Es opcional de
-    // verdad: no bloquea nada, solo deja de mostrar el ritmo.
-    const distanciaKm = parsearDistancia(distanciaTexto);
-    const ritmo = calcularRitmo(distanciaKm, Math.round(totalFinalMs / 1000));
-
     return (
-      <Pantalla scroll={false} style={estilos.centrada}>
+      <Pantalla style={estilos.centrada}>
         <Text style={estilos.tituloFinal}>Listo</Text>
         <Text style={estilos.detalle}>
           {minutos} {minutos === 1 ? 'minuto' : 'minutos'} de entrenamiento
         </Text>
 
-        {/* La distancia se pregunta SOLO en el cronometro: una sesion de
-            pasadas no tiene kilometros. */}
-        {cronometro && (
-          <View style={estilos.distancia}>
-            <Input
-              label="Distancia (opcional)"
-              value={distanciaTexto}
-              onChangeText={setDistanciaTexto}
-              placeholder="Ej: 6,2"
-              keyboardType="decimal-pad"
-            />
+        {!falloGuardar && <Text style={estilos.detalle}>Lo guardamos en tu agenda.</Text>}
 
-            {ritmo && distanciaKm !== null && (
-              <View style={estilos.ritmo}>
-                <Text style={estilos.detalle}>
-                  {formatearDecimal(distanciaKm)} km en {minutos} min
-                </Text>
-                {/* El min/km va grande y el km/h chico: el ritmo es el numero
-                    que mira la gente que corre. */}
-                <Text style={estilos.ritmoPrincipal}>Ritmo {ritmo.ritmoTexto} min/km</Text>
-                <Text style={estilos.ritmoSecundario}>{ritmo.velocidadTexto} km/h</Text>
-              </View>
-            )}
-          </View>
-        )}
+        {nivel && <GananciaXP nivel={nivel} />}
 
-        <Text style={estilos.detalle}>Lo guardamos en tu agenda.</Text>
-
-        <Boton titulo="Volver" onPress={volver} ancho />
+        <Boton titulo="Volver" onPress={() => router.back()} ancho />
       </Pantalla>
     );
   }
@@ -401,6 +466,23 @@ export default function Temporizador() {
   // -------------------------------------------------------------------------
   // Corriendo
   // -------------------------------------------------------------------------
+
+  if (corriendo && cronometro) {
+    return (
+      <VistaCronometroLibre
+        actividad={actividad}
+        km={gps.estado.km}
+        senal={senalGps(gps.estado, transcurrido, gps.permiso === 'concedido')}
+        transcurridoMs={transcurrido}
+        pausado={pausado}
+        pesoKg={pesoKg}
+        huboCorte={gps.huboCorte}
+        onCerrarAviso={gps.cerrarAviso}
+        onAlternarPausa={alternarPausa}
+        onTerminar={terminarAMano}
+      />
+    );
+  }
 
   if (corriendo && pos.fase) {
     const { fase } = pos;
@@ -637,6 +719,30 @@ export default function Temporizador() {
 
       <VistaPrevia config={config} resumen={resumenPlan(config)} />
 
+      {/* La actividad se elige antes: el GPS necesita saberla para filtrar
+          saltos (a pie no se va a 60 km/h), y la pantalla en vivo la muestra.
+          Las pasadas no tienen actividad. */}
+      {cronometro && (
+        <View style={estilos.chipsActividad}>
+          {ACTIVIDADES.map((a) => {
+            const activo = a === actividad;
+            return (
+              <Pressable
+                key={a}
+                style={[estilos.chipActividad, activo && estilos.chipActividadActivo]}
+                onPress={() => elegirActividad(a)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: activo }}
+              >
+                <Text style={[estilos.chipActividadTexto, activo && estilos.chipActividadTextoActivo]}>
+                  {ETIQUETA_ACTIVIDAD[a]}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+
       <Boton titulo="Empezar" onPress={empezar} ancho />
     </Pantalla>
   );
@@ -751,19 +857,17 @@ const estilos = StyleSheet.create({
     color: colors.textSecondary,
   },
 
-  // alignSelf stretch porque la pantalla de "Listo" centra a sus hijos: sin
-  // esto el Input se encoge al ancho de su texto.
-  distancia: { alignSelf: 'stretch', gap: spacing.md },
-  ritmo: { alignItems: 'center', gap: spacing.xs },
-  ritmoPrincipal: {
-    fontSize: fontSize.title,
-    lineHeight: lineHeight.title,
-    fontWeight: fontWeight.medium,
-    color: colors.textPrimary,
+  chipsActividad: { flexDirection: 'row', gap: spacing.sm },
+  chipActividad: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  ritmoSecundario: {
-    fontSize: fontSize.small,
-    lineHeight: lineHeight.small,
-    color: colors.textSecondary,
-  },
+  chipActividadActivo: { backgroundColor: colors.action, borderColor: colors.action },
+  chipActividadTexto: { fontSize: fontSize.small, lineHeight: lineHeight.small, color: colors.textPrimary },
+  chipActividadTextoActivo: { color: colors.textOnAction, fontWeight: fontWeight.medium },
 });

@@ -18,7 +18,7 @@
 import { crearEvento } from '../../db/queries/eventos';
 import { crearSesion } from '../../db/queries/sesiones';
 import { getDb } from '../../db/schema';
-import type { SesionEntrenamientoRow } from '../../db/schema';
+import type { ActividadCronometro, SesionEntrenamientoRow } from '../../db/schema';
 import { randomUUID } from '../../db/sync/uuid';
 import { aISOLocal } from '../../lib/fechas';
 import { intensidadDe, progresoEn } from './temporizador';
@@ -35,6 +35,16 @@ export interface DatosSesionTerminada {
    * redondear antes puede correr una fase que termina justo en el limite.
    */
   duracionRealMs: number;
+  /**
+   * Solo el cronometro libre: la actividad se elige antes de empezar y los km
+   * salen del GPS, asi que llegan junto con el resto y se escriben en la misma
+   * transaccion. Las pasadas no lo pasan.
+   */
+  cronometro?: {
+    actividad: ActividadCronometro;
+    distanciaKm: number | null;
+    kcal: number | null;
+  };
 }
 
 export interface ResultadoGuardado {
@@ -69,7 +79,7 @@ function minutosDe(ms: number): number {
 export async function guardarSesionTerminada(
   datos: DatosSesionTerminada,
 ): Promise<ResultadoGuardado> {
-  const { usuarioId, config, plan, inicio, duracionRealMs } = datos;
+  const { usuarioId, config, plan, inicio, duracionRealMs, cronometro } = datos;
 
   const progreso = progresoEn(plan, duracionRealMs);
   const duracionSeg = Math.max(0, Math.round(duracionRealMs / 1000));
@@ -105,9 +115,11 @@ export async function guardarSesionTerminada(
       bloques_completados: progreso.bloquesCompletados,
       pasadas_completadas: progreso.pasadasCompletadas,
       duracion_real_seg: duracionSeg,
-      // La distancia llega despues, desde la pantalla de "Listo". Ver
-      // actualizarDistancia() en db/queries/sesiones.ts.
-      distancia_km: null,
+      // Lo del cronometro libre. Si despues se corrigen los km desde la
+      // tarjeta, va por actualizarSesionCronometro() en db/queries/sesiones.ts.
+      distancia_km: cronometro?.distanciaKm ?? null,
+      actividad: cronometro?.actividad ?? null,
+      kcal_estimadas: cronometro?.kcal ?? null,
     });
   });
 

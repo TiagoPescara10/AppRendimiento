@@ -158,6 +158,24 @@ export const colors = {
   onFaseMedio: 'rgba(255, 255, 255, 0.55)',
   onFaseTenue: 'rgba(255, 255, 255, 0.24)',
 
+  // Cronometro libre, que va siempre sobre faseTrabajo.
+  //
+  // La pausa oscurece el fondo un escalon en vez de cambiar de color: sigue
+  // siendo la misma sesion, quieta.
+  faseTrabajoPausa: palette.navy800,
+  // Pastillas, botones y el aviso del GPS: una capa clara apenas visible.
+  onFaseSuperficie: 'rgba(255, 255, 255, 0.12)',
+  onFaseSuperficiePresionada: 'rgba(255, 255, 255, 0.22)',
+  onFaseBorde: 'rgba(255, 255, 255, 0.25)',
+  // Texto secundario sobre la fase ("Tiempo", "min/km", la unidad "km"): 7.03:1
+  // sobre faseTrabajo. Es texto, asi que aca la translucidez tiene que cumplir
+  // AA, a diferencia de onFaseMedio.
+  textOnFaseSuave: 'rgba(255, 255, 255, 0.8)',
+  // Los numeros en pausa: 5.67:1 sobre faseTrabajoPausa. Atenuados, pero se leen.
+  textOnFasePausa: 'rgba(255, 255, 255, 0.6)',
+  // El puntito de la pastilla del GPS. Solo decorativo: el estado lo dice el texto.
+  gpsActivo: palette.emerald400,
+
   // overlay de los modales. Tintado calido por lo mismo que las sombras.
   overlay: 'rgba(50, 40, 20, 0.5)',
 

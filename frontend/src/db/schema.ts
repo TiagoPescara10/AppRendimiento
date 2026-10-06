@@ -36,6 +36,8 @@ export type Intensidad = 'baja' | 'media' | 'alta';
 export type FuenteSueno = 'manual' | 'health_kit' | 'health_connect';
 export type MomentoDia = 'manana' | 'tarde' | 'noche';
 export type ModoEntrenamiento = 'pasadas' | 'cronometro' | 'rutina';
+/** Lo que se hizo con el cronometro libre. Ver src/lib/gasto.ts. */
+export type ActividadCronometro = 'correr' | 'caminar' | 'bici';
 export type GrupoMuscular = 'pecho' | 'espalda' | 'piernas' | 'hombros' | 'brazos' | 'core' | 'cardio';
 export type CategoriaRutinaPredefinida = 'principiante' | 'split' | 'especifica';
 
@@ -288,6 +290,13 @@ export interface SesionEntrenamientoRow {
 
   /** Solo el cronometro la tiene. null en cualquier sesion de pasadas o rutina. */
   distancia_km: number | null;
+
+  /** Solo el cronometro. null en las de antes de la v19. */
+  actividad: ActividadCronometro | null;
+  /** Gasto NETO estimado con el peso del momento. No suma al objetivo del dia. */
+  kcal_estimadas: number | null;
+  /** Foto de la tarjeta para compartir, en los documentos de la app. */
+  foto_uri: string | null;
 
   created_at: string;
   updated_at: string;

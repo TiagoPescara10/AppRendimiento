@@ -5,6 +5,7 @@
 
 import { getDb } from '../schema';
 import type {
+  ActividadCronometro,
   SesionEntrenamientoRow,
   SerieRow,
   EjercicioRow,
@@ -37,6 +38,8 @@ export interface NuevaSesion {
 
   /** Solo cronometro. */
   distancia_km?: number | null;
+  actividad?: ActividadCronometro | null;
+  kcal_estimadas?: number | null;
 }
 
 export async function crearSesion(datos: NuevaSesion): Promise<SesionEntrenamientoRow> {
@@ -48,8 +51,8 @@ export async function crearSesion(datos: NuevaSesion): Promise<SesionEntrenamien
     `INSERT INTO sesion_entrenamiento
        (id, evento_id, modo, rutina_gimnasio_id, bloques, pasadas, trabajo_seg, descanso_seg,
         descanso_bloque_seg, bloques_completados, pasadas_completadas,
-        duracion_real_seg, distancia_km, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        duracion_real_seg, distancia_km, actividad, kcal_estimadas, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       datos.id,
       datos.evento_id,
@@ -64,6 +67,8 @@ export async function crearSesion(datos: NuevaSesion): Promise<SesionEntrenamien
       datos.pasadas_completadas ?? null,
       datos.duracion_real_seg ?? null,
       datos.distancia_km ?? null,
+      datos.actividad ?? null,
+      datos.kcal_estimadas ?? null,
       t,
       t,
     ],
@@ -93,14 +98,56 @@ export async function obtenerSesionPorEvento(
   );
 }
 
-export async function actualizarDistancia(
+export interface CambiosCronometro {
+  distancia_km?: number | null;
+  actividad?: ActividadCronometro | null;
+  kcal_estimadas?: number | null;
+  foto_uri?: string | null;
+}
+
+/**
+ * Lo que se completa de una sesion de cronometro despues de terminarla:
+ * distancia, actividad, gasto estimado y foto. Solo toca las claves
+ * presentes: guardar la distancia no borra la foto, ni al reves. Una clave
+ * con null si la borra.
+ */
+export async function actualizarSesionCronometro(
   sesionId: string,
-  distanciaKm: number | null,
+  cambios: CambiosCronometro,
 ): Promise<void> {
+  const columnas = ['distancia_km', 'actividad', 'kcal_estimadas', 'foto_uri'] as const;
+  const campos: string[] = [];
+  const valores: (string | number | null)[] = [];
+  for (const c of columnas) {
+    if (cambios[c] === undefined) continue;
+    campos.push(`${c} = ?`);
+    valores.push(cambios[c] ?? null);
+  }
+  if (campos.length === 0) return;
+
   await getDb().runAsync(
-    'UPDATE sesion_entrenamiento SET distancia_km = ?, updated_at = ? WHERE id = ?',
-    [distanciaKm, ahora(), sesionId],
+    `UPDATE sesion_entrenamiento SET ${campos.join(', ')}, updated_at = ? WHERE id = ?`,
+    [...valores, ahora(), sesionId],
   );
+}
+
+/**
+ * La actividad de la ultima sesion de cronometro que tenga una. Es la que el
+ * selector arranca marcada; null si nunca se eligio ninguna.
+ */
+export async function ultimaActividadCronometro(
+  usuarioId: string,
+): Promise<ActividadCronometro | null> {
+  const fila = await getDb().getFirstAsync<{ actividad: ActividadCronometro }>(
+    `SELECT s.actividad
+     FROM sesion_entrenamiento s
+     JOIN evento e ON e.id = s.evento_id
+     WHERE e.usuario_id = ? AND s.modo = 'cronometro' AND s.actividad IS NOT NULL
+     ORDER BY e.fecha_hora_inicio DESC
+     LIMIT 1`,
+    [usuarioId],
+  );
+  return fila?.actividad ?? null;
 }
 
 // ---------------------------------------------------------------------------

@@ -1296,26 +1296,125 @@ await prueba('la distancia se carga despues y solo acepta valores utiles', async
   });
   igual(r.sesion.distancia_km, null, 'nace sin distancia');
 
-  await qSesiones.actualizarDistancia(r.sesion.id, 6.2);
+  await qSesiones.actualizarSesionCronometro(r.sesion.id, { distancia_km: 6.2 });
   igual((await qSesiones.obtenerSesion(r.sesion.id)).distancia_km, 6.2, 'cargada');
 
   // null la borra: es el unico valor que significa "sin distancia".
-  await qSesiones.actualizarDistancia(r.sesion.id, null);
+  await qSesiones.actualizarSesionCronometro(r.sesion.id, { distancia_km: null });
   igual((await qSesiones.obtenerSesion(r.sesion.id)).distancia_km, null, 'borrada');
 
   // El CHECK del DDL rechaza el 0, para que no haya dos formas de decir lo
   // mismo. parsearDistancia() ya lo convierte en null antes de llegar aca;
   // esto verifica que la base no dependa de eso.
   await lanza(
-    () => qSesiones.actualizarDistancia(r.sesion.id, 0),
+    () => qSesiones.actualizarSesionCronometro(r.sesion.id, { distancia_km: 0 }),
     /CHECK|constraint/i,
     'distancia 0',
   );
   await lanza(
-    () => qSesiones.actualizarDistancia(r.sesion.id, -3),
+    () => qSesiones.actualizarSesionCronometro(r.sesion.id, { distancia_km: -3 }),
     /CHECK|constraint/i,
     'distancia negativa',
   );
+});
+
+await prueba('actividad, kcal y foto: roundtrip y actualizacion parcial', async () => {
+  const plan = T.construirPlan(T.CONFIG_CRONOMETRO);
+  const r = await entrenamiento.guardarSesionTerminada({
+    usuarioId: 'u1', config: T.CONFIG_CRONOMETRO, plan,
+    inicio: new Date(2026, 8, 7, 8, 0, 0), duracionRealMs: 2712000,
+  });
+  const leer = () => qSesiones.obtenerSesion(r.sesion.id);
+  igual((await leer()).actividad, null, 'nace sin actividad');
+  igual((await leer()).kcal_estimadas, null, 'nace sin kcal');
+  igual((await leer()).foto_uri, null, 'nace sin foto');
+
+  await qSesiones.actualizarSesionCronometro(r.sesion.id, {
+    distancia_km: 6.2, actividad: 'correr', kcal_estimadas: 410,
+    foto_uri: 'file:///docs/fotos-sesion/x.jpg',
+  });
+  let s = await leer();
+  igual(s.distancia_km, 6.2, 'distancia');
+  igual(s.actividad, 'correr', 'actividad');
+  igual(s.kcal_estimadas, 410, 'kcal');
+  igual(s.foto_uri, 'file:///docs/fotos-sesion/x.jpg', 'foto');
+
+  // Solo toca lo que se pasa: cambiar la actividad no borra la foto.
+  await qSesiones.actualizarSesionCronometro(r.sesion.id, { actividad: 'caminar', kcal_estimadas: 180 });
+  s = await leer();
+  igual(s.actividad, 'caminar', 'actividad nueva');
+  igual(s.foto_uri, 'file:///docs/fotos-sesion/x.jpg', 'la foto sigue');
+  igual(s.distancia_km, 6.2, 'la distancia sigue');
+
+  await qSesiones.actualizarSesionCronometro(r.sesion.id, { foto_uri: null });
+  igual((await leer()).foto_uri, null, 'null borra la foto');
+});
+
+await prueba('el cronometro libre guarda actividad, km del GPS y kcal en la misma escritura', async () => {
+  // Usuario propio: con u1, esta sesion pasaria a ser su ultima actividad y
+  // cambiaria lo que ven las pruebas de abajo.
+  await qPerfil.crearPerfil({ id: 'u-gps', fecha_alta: '2026-09-01T10:00:00-03:00' });
+  const plan = T.construirPlan(T.CONFIG_CRONOMETRO);
+  const r = await entrenamiento.guardarSesionTerminada({
+    usuarioId: 'u-gps', config: T.CONFIG_CRONOMETRO, plan,
+    inicio: new Date(2026, 8, 9, 7, 30, 0), duracionRealMs: 1122000,
+    cronometro: { actividad: 'bici', distanciaKm: 3.47, kcal: 280 },
+  });
+  const s = await qSesiones.obtenerSesion(r.sesion.id);
+  igual(s.actividad, 'bici', 'actividad');
+  igual(s.distancia_km, 3.47, 'km');
+  igual(s.kcal_estimadas, 280, 'kcal');
+
+  // Sin GPS: km null, el resto igual.
+  const r2 = await entrenamiento.guardarSesionTerminada({
+    usuarioId: 'u-gps', config: T.CONFIG_CRONOMETRO, plan,
+    inicio: new Date(2026, 8, 9, 18, 0, 0), duracionRealMs: 600000,
+    cronometro: { actividad: 'correr', distanciaKm: null, kcal: null },
+  });
+  const s2 = await qSesiones.obtenerSesion(r2.sesion.id);
+  igual(s2.actividad, 'correr', 'sin GPS: actividad');
+  igual(s2.distancia_km, null, 'sin GPS: km');
+  igual(s2.kcal_estimadas, null, 'sin peso: kcal');
+  igual(await qSesiones.ultimaActividadCronometro('u-gps'), 'correr', 'la ultima es la de la tarde');
+
+  // Sin dejar rastro: la prueba del CASCADE de mas abajo cuenta la tabla entera.
+  await qPerfil.eliminarPerfil('u-gps');
+});
+
+await prueba('los CHECK de actividad y kcal rechazan valores invalidos', async () => {
+  const plan = T.construirPlan(T.CONFIG_CRONOMETRO);
+  const r = await entrenamiento.guardarSesionTerminada({
+    usuarioId: 'u1', config: T.CONFIG_CRONOMETRO, plan,
+    inicio: new Date(2026, 8, 8, 8, 0, 0), duracionRealMs: 600000,
+  });
+  await lanza(
+    () => qSesiones.actualizarSesionCronometro(r.sesion.id, { actividad: 'otro' }),
+    /CHECK|constraint/i, 'actividad fuera de las tres');
+  await lanza(
+    () => qSesiones.actualizarSesionCronometro(r.sesion.id, { kcal_estimadas: -10 }),
+    /CHECK|constraint/i, 'kcal negativas');
+  await qSesiones.actualizarSesionCronometro(r.sesion.id, { kcal_estimadas: 0 });
+  igual((await qSesiones.obtenerSesion(r.sesion.id)).kcal_estimadas, 0, 'cero si se acepta');
+});
+
+await prueba('ultimaActividadCronometro() devuelve la de la sesion mas reciente que tenga una', async () => {
+  const plan = T.construirPlan(T.CONFIG_CRONOMETRO);
+  const nueva = (dia) => entrenamiento.guardarSesionTerminada({
+    usuarioId: 'u-act', config: T.CONFIG_CRONOMETRO, plan,
+    inicio: new Date(2026, 8, dia, 8, 0, 0), duracionRealMs: 600000,
+  });
+  await qPerfil.crearPerfil({ id: 'u-act', fecha_alta: '2026-09-01T10:00:00-03:00' });
+  igual(await qSesiones.ultimaActividadCronometro('u-act'), null, 'sin sesiones');
+
+  const vieja = await nueva(1);
+  await qSesiones.actualizarSesionCronometro(vieja.sesion.id, { actividad: 'bici' });
+  const reciente = await nueva(5);
+  await qSesiones.actualizarSesionCronometro(reciente.sesion.id, { actividad: 'caminar' });
+  await nueva(9); // la mas nueva, sin actividad: no cuenta
+  igual(await qSesiones.ultimaActividadCronometro('u-act'), 'caminar', 'la mas reciente con actividad');
+  igual(await qSesiones.ultimaActividadCronometro('u1'), 'caminar', 'es por usuario');
+  // Sin dejar rastro: la prueba del CASCADE de mas abajo cuenta la tabla entera.
+  await qPerfil.eliminarPerfil('u-act');
 });
 
 // Un evento con sesion para las dos pruebas que siguen. Antes lo dejaba parada
@@ -2785,6 +2884,44 @@ await prueba('la 015 sobre una base v14 con duplicados: deja la fila mas vieja y
     'el indice unico existe tras la 015',
   );
 
+  await db.closeAsync();
+});
+
+await prueba('la 019 sobre una base v18: agrega las columnas y las sesiones viejas quedan en null', async () => {
+  const db = await sqlite.openDatabaseAsync(join(tmp, 'v19-test.db'));
+  await db.execAsync('PRAGMA foreign_keys = ON;');
+  for (let v = 1; v <= 18; v++) {
+    await db.execAsync(migrations.migraciones.find((mig) => mig.version === v).sql);
+  }
+  await db.execAsync('PRAGMA user_version = 18');
+
+  const t = '2026-09-01T00:00:00.000Z';
+  await db.runAsync("INSERT INTO perfil (id, fecha_alta, created_at, updated_at) VALUES ('u-19', '2026-09-01', ?, ?)", [t, t]);
+  await db.runAsync(
+    `INSERT INTO evento (id, usuario_id, tipo, intensidad, fecha_hora_inicio, completado, respondido, modo_entrenamiento, created_at, updated_at)
+     VALUES ('ev-19', 'u-19', 'entrenamiento', 'media', '2026-09-01T08:00:00-03:00', 1, 1, 'cronometro', ?, ?)`,
+    [t, t],
+  );
+  await db.runAsync(
+    `INSERT INTO sesion_entrenamiento (id, evento_id, modo, bloques, pasadas, trabajo_seg, descanso_seg,
+       descanso_bloque_seg, bloques_completados, pasadas_completadas, duracion_real_seg, distancia_km,
+       created_at, updated_at)
+     VALUES ('se-19', 'ev-19', 'cronometro', 1, 1, 0, 0, 0, 1, 1, 2700, 5.0, ?, ?)`,
+    [t, t],
+  );
+
+  const v = await migrations.migrar(db);
+  igual(v, 19, 'queda en v19');
+  const fila = await db.getFirstAsync('SELECT * FROM sesion_entrenamiento WHERE id = ?', ['se-19']);
+  igual(fila.distancia_km, 5, 'la distancia de antes sigue');
+  igual(fila.actividad, null, 'actividad null');
+  igual(fila.kcal_estimadas, null, 'kcal null');
+  igual(fila.foto_uri, null, 'foto null');
+
+  await lanza(
+    () => db.runAsync("UPDATE sesion_entrenamiento SET actividad = 'otro' WHERE id = 'se-19'"),
+    /CHECK/i, 'otro no entra');
+  await db.runAsync("UPDATE sesion_entrenamiento SET actividad = 'bici', kcal_estimadas = 300 WHERE id = 'se-19'");
   await db.closeAsync();
 });
 

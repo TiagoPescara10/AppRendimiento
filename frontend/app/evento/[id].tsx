@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
+import { borrarFotoSesion } from '@/features/compartir/fotos';
 import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 
 import { obtenerEvento, marcarCompletado, eliminarEvento } from '@/db/queries/eventos';
@@ -114,6 +115,9 @@ export default function DetalleEvento() {
         onPress: async () => {
           try {
             await eliminarEvento(evento.id);
+            // La sesion cae por CASCADE; su foto es un archivo y no, asi que se
+            // borra a mano para no dejarla huerfana en los documentos.
+            borrarFotoSesion(sesion?.foto_uri ?? null);
             // No recarga: el evento ya no existe y esta pantalla es solo sobre
             // el. Volver deja al usuario en la agenda, que si se recarga sola
             // al tomar foco.
@@ -240,6 +244,15 @@ export default function DetalleEvento() {
           sesion={sesion}
           usuarioId={usuarioId}
           eventoFecha={evento.fecha}
+        />
+      )}
+
+      {/* La tarjeta para compartir es solo del cronometro libre. */}
+      {sesion?.modo === 'cronometro' && (
+        <Boton
+          titulo="Crear imagen para compartir"
+          variante="secundario"
+          onPress={() => router.push(`/evento/compartir?id=${evento.id}`)}
         />
       )}
 
