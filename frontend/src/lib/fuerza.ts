@@ -240,3 +240,38 @@ export function agruparEjerciciosPorRutina<E extends { id: string }>(
 
   return grupos;
 }
+
+/** Lo minimo de una serie para describirla. Una SerieRow o un borrador encajan. */
+export interface SerieHecha {
+  repeticiones: number;
+  pesoKg: number | null;
+}
+
+/** "62,5": coma decimal y sin ceros de relleno. */
+function kgTexto(kg: number): string {
+  return String(Math.round(kg * 100) / 100).replace('.', ',');
+}
+
+function serieTexto(s: SerieHecha): string {
+  return s.pesoKg && s.pesoKg > 0 ? `${s.repeticiones} × ${kgTexto(s.pesoKg)} kg` : `${s.repeticiones} reps`;
+}
+
+/**
+ * Como se lee lo hecho en un ejercicio en el cierre de la sesion.
+ *
+ * Si todas las series fueron iguales se agrupan ("3 series de 10 × 60 kg"),
+ * que es como lo dice cualquiera en el gimnasio. Si no, van una por una en el
+ * orden en que se hicieron: agruparlas perderia la progresion de la carga.
+ * Sin series devuelve '' y la pantalla no muestra el ejercicio.
+ */
+export function textoSeriesEjercicio(series: SerieHecha[]): string {
+  if (series.length === 0) return '';
+
+  const primera = serieTexto(series[0]);
+  const todasIguales = series.every((s) => serieTexto(s) === primera);
+
+  if (todasIguales) {
+    return series.length === 1 ? primera : `${series.length} series de ${primera}`;
+  }
+  return series.map(serieTexto).join(' · ');
+}

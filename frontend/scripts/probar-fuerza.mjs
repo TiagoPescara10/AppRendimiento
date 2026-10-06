@@ -288,6 +288,35 @@ prueba('agrupar: sin ejercicios fuera de rutina no hay "Otros"', () => {
   igual(grupos.length, 1, 'grupos');
 });
 
+// --- texto del cierre de sesion ------------------------------------------------
+
+console.log('\ntexto del cierre de sesion:');
+
+prueba('series iguales se agrupan', () => {
+  const s = { repeticiones: 10, pesoKg: 60 };
+  igual(F.textoSeriesEjercicio([s, s, s]), '3 series de 10 × 60 kg', 'tres iguales');
+  igual(F.textoSeriesEjercicio([s]), '10 × 60 kg', 'una sola');
+});
+
+prueba('series distintas van una por una y en orden', () => {
+  igual(
+    F.textoSeriesEjercicio([
+      { repeticiones: 10, pesoKg: 60 },
+      { repeticiones: 8, pesoKg: 62.5 },
+      { repeticiones: 8, pesoKg: 65 },
+    ]),
+    '10 × 60 kg · 8 × 62,5 kg · 8 × 65 kg',
+    'progresion',
+  );
+});
+
+prueba('sin peso se cuentan repeticiones', () => {
+  const s = { repeticiones: 12, pesoKg: null };
+  igual(F.textoSeriesEjercicio([s, s]), '2 series de 12 reps', 'peso corporal');
+  igual(F.textoSeriesEjercicio([{ repeticiones: 12, pesoKg: 0 }]), '12 reps', 'peso cero');
+  igual(F.textoSeriesEjercicio([]), '', 'vacio');
+});
+
 // --- resumen final ---------------------------------------------------------
 
 console.log(`\n${ok} pasan, ${fallos.length} fallan\n`);

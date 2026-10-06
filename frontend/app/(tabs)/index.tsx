@@ -26,6 +26,8 @@ import { SheetModoEntrenamiento } from '@/features/entrenamiento/components/Shee
 import { proximosEventos, minutosEntrenamientoDelDia } from '@/db/queries/eventos';
 import { CardHidratacion } from '@/features/nutricion/components/CardHidratacion';
 import { MascotaLeon } from '@/features/mascota/MascotaLeon';
+import { bonoMensualPendiente } from '@/features/nivel/api';
+import { CardBonoMensual } from '@/features/nivel/components/CardBonoMensual';
 import {
   obtenerConsejoLeon,
   type ConsejoLeon,
@@ -82,6 +84,10 @@ export default function Dashboard() {
   const router = useRouter();
   const [estado, setEstado] = useState<Estado | null>(null);
   const [sheetEntrenarVisible, setSheetEntrenarVisible] = useState(false);
+  // El aviso del bono del mes anterior. Solo se setea, nunca se limpia en un
+  // foco: la marca en meta ya quedo escrita, asi que el siguiente foco
+  // devuelve null y no tiene que hacer desaparecer lo que se esta leyendo.
+  const [bonoMensual, setBonoMensual] = useState<string | null>(null);
 
   // useFocusEffect y no useEffect: al volver de registrar una comida o agua, el
   // dashboard tiene que reflejarla.
@@ -92,6 +98,13 @@ export default function Dashboard() {
       (async () => {
         const perfil = await obtenerPerfilLocal();
         if (!perfil) return;
+
+        // Aparte y sin esperar: no frena el resto del dashboard.
+        bonoMensualPendiente(perfil.id)
+          .then((texto) => {
+            if (vivo && texto) setBonoMensual(texto);
+          })
+          .catch((e) => console.error('Error al revisar el bono mensual:', e));
 
         const hoy = aFechaLocal(new Date());
         const ahoraIso = new Date().toISOString();
@@ -269,6 +282,10 @@ export default function Dashboard() {
         nombreUsuario={estado.nombreUsuario}
         fechaTexto={fecha}
       />
+
+      {bonoMensual && (
+        <CardBonoMensual texto={bonoMensual} onCerrar={() => setBonoMensual(null)} />
+      )}
 
       {/* Lo que queda del dia o total consumido */}
       {esRecuento ? (

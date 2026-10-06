@@ -46,6 +46,12 @@ import {
   type SeriePreviaEjercicio,
 } from '@/db/queries/sesiones';
 import { guardarRutinaTerminada } from '@/features/entrenamiento/guardarRutina';
+import { cargarNivel } from '@/features/nivel/api';
+import type { DatosNivel } from '@/features/nivel/api';
+import { GananciaXP } from '@/features/nivel/components/GananciaXP';
+import { textoSeriesEjercicio } from '@/lib/fuerza';
+import { Pantalla } from '@/ui/Pantalla';
+import { Boton } from '@/ui/Boton';
 import { randomUUID } from '@/db/sync/uuid';
 import type { EjercicioRow, GrupoMuscular } from '@/db/schema';
 
@@ -156,6 +162,13 @@ export default function SesionRutina() {
   const [creandoEjercicio, setCreandoEjercicio] = useState(false);
 
   const [guardando, setGuardando] = useState(false);
+  // Cierre de la sesion: se llena al guardar bien y cambia la pantalla. Es la
+  // rutina tal como quedo guardada, ejercicio por ejercicio. El nivel llega
+  // despues, releido con la sesion ya sumada.
+  const [terminado, setTerminado] = useState<{ id: string; nombre: string; detalle: string }[] | null>(
+    null,
+  );
+  const [nivel, setNivel] = useState<DatosNivel | null>(null);
 
   // Margen superior para el modal de ejercicios
   const margenSuperiorModal =
@@ -645,7 +658,22 @@ export default function SesionRutina() {
           nombreRutina,
         });
 
-        router.back();
+        // Mismo filtro que listaSeriesPlana: se muestra lo que se guardo, y un
+        // ejercicio sin ninguna serie guardada no aparece.
+        setTerminado(
+          ejerciciosSesion
+            .map((item) => ({
+              id: item.ejercicio.id,
+              nombre: item.ejercicio.nombre,
+              detalle: textoSeriesEjercicio(item.series.filter((s) => s.repeticiones > 0)),
+            }))
+            .filter((e) => e.detalle !== ''),
+        );
+        // Despues de guardar: la XP sale de los eventos y el de esta sesion
+        // recien ahora existe. Si falla, el cierre se muestra sin el nivel.
+        cargarNivel()
+          .then(setNivel)
+          .catch((e) => console.error('Error al cargar el nivel:', e));
       } catch (e) {
         console.error('Error al guardar rutina:', e);
         Alert.alert('Error', 'No se pudo guardar la rutina.');
@@ -679,6 +707,33 @@ export default function SesionRutina() {
       router.back();
     }
   };
+
+  if (terminado) {
+    return (
+      <Pantalla style={estilos.cierre}>
+        <Text style={estilos.cierreTitulo}>Listo</Text>
+        <Text style={estilos.cierreDetalle}>{nombreRutina ?? 'Rutina libre'}</Text>
+
+        <View style={estilos.cierreCard}>
+          {terminado.map((e, i) => (
+            <View key={e.id}>
+              {i > 0 && <View style={estilos.cierreSeparador} />}
+              <View style={estilos.cierreFila}>
+                <Text style={estilos.cierreEjercicio}>{e.nombre}</Text>
+                <Text style={estilos.cierreSeries}>{e.detalle}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+
+        <Text style={estilos.cierreDetalle}>Lo guardamos en tu agenda.</Text>
+
+        {nivel && <GananciaXP nivel={nivel} />}
+
+        <Boton titulo="Volver" onPress={() => router.back()} ancho />
+      </Pantalla>
+    );
+  }
 
   return (
     <View style={estilos.contenedorPrincipal}>
@@ -1357,6 +1412,42 @@ const estilos = StyleSheet.create({
   contenedorPrincipal: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+
+  // Cierre, mismo molde que el "Listo" del temporizador
+  // Centrado vertical mientras entre; con muchos ejercicios scrollea.
+  cierre: { justifyContent: 'center', alignItems: 'center', gap: spacing.md },
+  cierreCard: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    ...shadow.card,
+  },
+  cierreFila: { paddingVertical: spacing.sm, gap: 2 },
+  cierreSeparador: { height: sizes.hairline, backgroundColor: colors.border },
+  cierreEjercicio: {
+    fontSize: fontSize.body,
+    lineHeight: lineHeight.body,
+    fontWeight: fontWeight.medium,
+    color: colors.textPrimary,
+  },
+  cierreSeries: {
+    fontSize: fontSize.small,
+    lineHeight: lineHeight.small,
+    color: colors.textSecondary,
+  },
+  cierreTitulo: {
+    fontSize: fontSize.display,
+    lineHeight: lineHeight.display,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+  },
+  cierreDetalle: {
+    fontSize: fontSize.body,
+    lineHeight: lineHeight.body,
+    color: colors.textSecondary,
   },
 
   // 1. Header fijo

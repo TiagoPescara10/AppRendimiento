@@ -24,6 +24,11 @@ import { cerrarSesion } from '@/features/auth/session';
 import { SheetRegistroPeso } from '@/features/perfil/components/SheetRegistroPeso';
 import { SheetMetaAgua } from '@/features/perfil/components/SheetMetaAgua';
 import { sembrarDatosDesarrollo } from '@/db/seeds/devSeed';
+import { cargarNivel } from '@/features/nivel/api';
+import type { DatosNivel } from '@/features/nivel/api';
+import { BarraNivel } from '@/features/nivel/components/BarraNivel';
+import { InsigniaNivel } from '@/features/nivel/components/InsigniaNivel';
+import { SheetComoSumas } from '@/features/nivel/components/SheetComoSumas';
 import type { PerfilRow, RegistroPesoRow } from '@/db/schema';
 
 // ---------------------------------------------------------------------------
@@ -74,6 +79,8 @@ export default function Perfil() {
   const [metaAguaCalculada, setMetaAguaCalculada] = useState<number>(2000);
   const [sheetPesoVisible, setSheetPesoVisible] = useState(false);
   const [sheetAguaVisible, setSheetAguaVisible] = useState(false);
+  const [nivel, setNivel] = useState<DatosNivel | null>(null);
+  const [ayudaNivel, setAyudaNivel] = useState(false);
 
   const cargarDatos = useCallback(async () => {
     try {
@@ -85,13 +92,15 @@ export default function Perfil() {
       setPerfil(p);
 
       const hoy = aFechaLocal(new Date());
-      const [uPeso, historialPesos, minEntreno] = await Promise.all([
+      const [uPeso, historialPesos, minEntreno, datosNivel] = await Promise.all([
         ultimoPeso(p.id),
         listarPesos(p.id),
         minutosEntrenamientoDelDia(p.id, hoy),
+        cargarNivel(),
       ]);
 
       setUltimo(uPeso);
+      setNivel(datosNivel);
       setMetaAguaCalculada(calcularMetaAgua(uPeso?.peso_kg ?? 70, minEntreno));
 
       // El peso mas antiguo del historial como peso inicial
@@ -239,10 +248,20 @@ export default function Perfil() {
       <View style={[estilos.card, estilos.identidadCard]}>
         <View style={estilos.avatar}>
           <Text style={estilos.avatarTexto}>{inicialNombre}</Text>
+          {nivel && (
+            <View style={estilos.badgeNivel}>
+              <InsigniaNivel nivel={nivel.nivel} tamano={28} />
+            </View>
+          )}
         </View>
 
         <View style={estilos.identidadInfo}>
           <Text style={estilos.nombreTexto}>{perfil.nombre ?? 'Usuario'}</Text>
+          {nivel && (
+            <Text style={estilos.nivelTexto}>
+              Nivel {nivel.nivel} · {nivel.nombre}
+            </Text>
+          )}
           <Text style={estilos.datosTexto}>
             {[
               edad != null ? `${edad} años` : null,
@@ -283,6 +302,45 @@ export default function Perfil() {
             <Text style={estilos.textoChico}>{detalleNutricion}</Text>
           )}
         </View>
+      )}
+
+      {/* Progreso de nivel. Los dos datos son historicos y no bajan con la
+          inactividad: la racha actual vive en Constancia, no aca. */}
+      {nivel && (
+        <View style={estilos.card}>
+          <View style={estilos.cardHeaderFila}>
+            <Text style={estilos.cardTitulo}>Nivel {nivel.nivel} · {nivel.nombre}</Text>
+            <Pressable
+              onPress={() => setAyudaNivel(true)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Cómo sumás puntos"
+            >
+              <Ionicons name="information-circle-outline" size={18} color={colors.textSecondary} />
+            </Pressable>
+          </View>
+          <BarraNivel nivel={nivel} />
+          <View style={estilos.nivelDatos}>
+            <View style={estilos.nivelDato}>
+              <Text style={estilos.nivelDatoValor}>{nivel.sesionesTotales}</Text>
+              <Text style={estilos.cardSubtitulo}>Sesiones totales</Text>
+            </View>
+            <View style={estilos.nivelDato}>
+              <Text style={estilos.nivelDatoValor}>
+                {nivel.mejorRachaSemanas} {nivel.mejorRachaSemanas === 1 ? 'semana' : 'semanas'}
+              </Text>
+              <Text style={estilos.cardSubtitulo}>Mejor racha</Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {nivel && (
+        <SheetComoSumas
+          visible={ayudaNivel}
+          nivelActual={nivel.nivel}
+          onCerrar={() => setAyudaNivel(false)}
+        />
       )}
 
       {/* Bloque c: Ajustes */}
@@ -514,6 +572,35 @@ const estilos = StyleSheet.create({
     lineHeight: lineHeight.title,
     fontWeight: '600',
     color: colors.textOnAccentSoft,
+  },
+  // La insignia cuelga de la esquina del avatar; el aro blanco de 2 px la
+  // despega del fondo del avatar sin necesitar sombra.
+  badgeNivel: {
+    position: 'absolute',
+    right: -spacing.sm,
+    bottom: -spacing.sm,
+    borderRadius: radius.pill,
+    borderWidth: 2,
+    borderColor: colors.nivelBadgeBorde,
+    backgroundColor: colors.nivelBadgeBorde,
+  },
+  nivelTexto: {
+    fontSize: fontSize.small,
+    lineHeight: lineHeight.small,
+    fontWeight: fontWeight.medium,
+    color: colors.action,
+  },
+  nivelDatos: {
+    flexDirection: 'row',
+    gap: spacing.lg,
+    marginTop: spacing.xs,
+  },
+  nivelDato: { flex: 1, gap: spacing.xs },
+  nivelDatoValor: {
+    fontSize: fontSize.subtitle,
+    lineHeight: lineHeight.subtitle,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
   },
   identidadInfo: {
     flex: 1,

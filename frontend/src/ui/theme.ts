@@ -173,6 +173,26 @@ export const colors = {
   avatarFondo: palette.leonFondo,
   avatarBorde: palette.leonBorde,
 
+  // nivel y XP. La barra va sobre blanco (Perfil y cierres de sesion) o sobre
+  // accentSoft (card de Progreso): una pista para cada fondo, mismo relleno.
+  nivelPista: palette.navy100,
+  // navy700 al 15%. Sobre el crema de accentSoft, border y navy100 casi no se
+  // ven. Solo decorativa: el dato esta en el texto de abajo.
+  pistaSobreAccentSoft: 'rgba(36, 59, 143, 0.15)',
+  nivelRelleno: palette.navy700,
+  // el aro blanco que despega la insignia de nivel del avatar.
+  nivelBadgeBorde: palette.white,
+
+  // tarjeta para compartir una sesion. Sobre la foto, cualquier foto: el
+  // degrade la oscurece lo suficiente para que el blanco se lea siempre.
+  overlayFotoFuerte: 'rgba(0, 0, 0, 0.78)',
+  overlayFotoSuave: 'rgba(0, 0, 0, 0.45)',
+  textoSobreFoto: palette.white,
+  textoSobreFotoSuave: 'rgba(255, 255, 255, 0.75)',
+  separadorSobreFoto: 'rgba(255, 255, 255, 0.30)',
+  // los chevrons de fondo de la tarjeta sin foto. Solo decorativos.
+  marcaAguaNivel: 'rgba(255, 255, 255, 0.08)',
+
   // indicadores de seccion (progreso)
   seccionPeso: palette.navy700,
   seccionConstancia: palette.emerald400,

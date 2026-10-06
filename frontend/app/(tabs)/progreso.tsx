@@ -3,8 +3,9 @@
 //
 // EL ORDEN DE LAS CARDS ES UNA DECISION, no el orden en que se escribieron.
 // Esta es la pantalla donde mas facil se lee un fracaso, asi que la constancia
-// va JUSTO DEBAJO del peso: si el peso bajo poco, al lado esta lo que el
-// usuario si controla. Y no hay ni un mensaje de reto ni una felicitacion en
+// va JUSTO DEBAJO del peso (con el nivel en el medio, que tambien es algo que
+// el usuario controla): si el peso bajo poco, al lado esta lo que el usuario
+// si controla. Y no hay ni un mensaje de reto ni una felicitacion en
 // ningun lado; los numeros hablan solos.
 //
 // Aca no se calcula nada. Los datos llegan armados de features/progreso/api.ts
@@ -24,6 +25,10 @@ import { cargarProgreso } from '@/features/progreso/api';
 import type { DatosProgreso } from '@/features/progreso/api';
 import type { EntrenamientoPropio } from '@/lib/progreso';
 import { GraficoPeso } from '@/features/progreso/components/GraficoPeso';
+import { BarraNivel } from '@/features/nivel/components/BarraNivel';
+import { InsigniaNivel } from '@/features/nivel/components/InsigniaNivel';
+import { SheetComoSumas } from '@/features/nivel/components/SheetComoSumas';
+import { textoProgresoNivel } from '@/lib/nivel';
 import {
   ETIQUETA_PERIODO,
   avisoRitmo,
@@ -79,6 +84,7 @@ export default function Progreso() {
       ) : (
         <>
           <CardPeso datos={datos} />
+          <CardNivel datos={datos} />
           <CardConstancia datos={datos} />
           <CardPropios datos={datos} />
           <CardNutricion datos={datos} />
@@ -134,8 +140,10 @@ function CardPeso({ datos }: { datos: DatosProgreso }) {
               {peso.actualKg === null ? '—' : kg(peso.actualKg)}
               <Text style={estilos.unidad}> kg</Text>
             </Text>
-            {peso.actualKg !== null && (
-              <Text style={estilos.detalle}>Último registro · {fechaCorta(hoy)}</Text>
+            {/* La fecha del registro, no la de hoy: el peso puede ser de hace
+                una semana y tiene que decirlo. */}
+            {peso.fechaUltimo !== null && (
+              <Text style={estilos.detalle}>Último registro · {fechaCorta(peso.fechaUltimo)}</Text>
             )}
           </View>
 
@@ -182,6 +190,44 @@ function CardPeso({ datos }: { datos: DatosProgreso }) {
         )}
       </View>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Nivel
+//
+// Va entre Peso y Constancia y no arriba de todo: el peso es lo principal de
+// esta pantalla. Informa, no festeja. No depende del periodo elegido.
+//
+// Fondo accentSoft y la insignia sola, con sus colores. La version marina con
+// la insignia sobre un circulo blanco se leia como un blanco de tiro.
+// ---------------------------------------------------------------------------
+
+function CardNivel({ datos }: { datos: DatosProgreso }) {
+  const { nivel } = datos;
+  const [ayuda, setAyuda] = useState(false);
+  return (
+    <View style={[estilos.card, estilos.cardNivel]}>
+      <InsigniaNivel nivel={nivel.nivel} tamano={76} />
+
+      <View style={[estilos.flex, estilos.nivelColumna]}>
+        <View style={estilos.fila}>
+          <Text style={estilos.nivelEtiqueta}>Nivel {nivel.nivel}</Text>
+          <Pressable
+            onPress={() => setAyuda(true)}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Cómo sumás puntos"
+          >
+            <Ionicons name="information-circle-outline" size={18} color={colors.textSecondary} />
+          </Pressable>
+        </View>
+        <Text style={estilos.nivelNombre}>{nivel.nombre}</Text>
+        <BarraNivel nivel={nivel} fondo="accentSoft" texto={textoProgresoNivel(nivel.xpActual)} />
+      </View>
+
+      <SheetComoSumas visible={ayuda} nivelActual={nivel.nivel} onCerrar={() => setAyuda(false)} />
+    </View>
   );
 }
 
@@ -616,6 +662,30 @@ const estilos = StyleSheet.create({
     padding: spacing.xl,
     gap: spacing.md,
     ...shadow.card,
+  },
+
+  // Mismo radio, padding y sombra que la de Peso (estilos.card); cambia el
+  // fondo y pasa a fila: insignia a la izquierda, texto a la derecha.
+  cardNivel: {
+    backgroundColor: colors.accentSoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+  },
+  nivelColumna: { gap: spacing.xs },
+  nivelEtiqueta: {
+    fontSize: fontSize.caption,
+    lineHeight: lineHeight.caption,
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  nivelNombre: {
+    fontSize: fontSize.title,
+    lineHeight: lineHeight.title,
+    fontWeight: fontWeight.bold,
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
   },
 
   filaPeso: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.md },

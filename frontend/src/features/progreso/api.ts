@@ -36,6 +36,8 @@ import type {
   ResumenAsistencia,
   VolumenPropio,
 } from '@/lib/progreso';
+import { nivelDeEventos } from '@/features/nivel/api';
+import type { DatosNivel } from '@/features/nivel/api';
 import { DIAS_PERIODO, direccionDeseada } from './formato';
 import type { Periodo } from './formato';
 
@@ -48,6 +50,8 @@ const INICIO_DE_LOS_TIEMPOS = '0001-01-01';
 export interface DatosPeso {
   /** El ultimo registro de verdad, sin suavizar: es lo que dijo la balanza. */
   actualKg: number | null;
+  /** 'YYYY-MM-DD' de ese ultimo registro. null si no hay ninguno. */
+  fechaUltimo: string | null;
   objetivoKg: number | null;
   /** Para donde es "bien" segun el perfil. Ver direccionDeseada(). */
   direccion: -1 | 0 | 1;
@@ -87,6 +91,8 @@ export interface DatosProgreso {
   asistencia: DatosAsistencia;
   propios: { volumen: VolumenPropio; items: EntrenamientoPropio[] };
   nutricion: { promedio: PromedioDiario; objetivo: ResultadoNutricional | null };
+  /** Sobre TODO el historial, como la racha: el nivel no depende del periodo. */
+  nivel: DatosNivel;
 }
 
 /** El objetivo nutricional del dia, o null si el onboarding quedo a medias. */
@@ -211,6 +217,7 @@ export async function cargarProgreso(periodo: Periodo): Promise<DatosProgreso | 
     diasDelPeriodo,
     peso: {
       actualKg: ultimo?.peso_kg ?? null,
+      fechaUltimo: ultimo?.fecha ?? null,
       objetivoKg: perfil.peso_objetivo_kg,
       direccion: direccionDeseada(perfil.objetivo),
       deltaKg,
@@ -219,6 +226,8 @@ export async function cargarProgreso(periodo: Periodo): Promise<DatosProgreso | 
       proyeccion,
     },
     asistencia,
+    // Mismos eventos que ya se leyeron para la racha: cero queries de mas.
+    nivel: nivelDeEventos(eventos),
     propios: { volumen: volumenPropio(propiosOrdenados), items: propiosOrdenados },
     nutricion: {
       promedio: promedioDiario(items),
