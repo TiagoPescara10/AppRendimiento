@@ -62,6 +62,8 @@ writeFileSync(
       join(RAIZ, 'src/features/entrenamiento/guardarSesion.ts'),
       join(RAIZ, 'src/features/entrenamiento/guardarRutina.ts'),
       join(RAIZ, 'src/features/comidas/porciones.ts'),
+      // Puro: la conversion que usan las pantallas para armar cantidad_g.
+      join(RAIZ, 'src/lib/coccion.ts'),
     ],
   }),
 );
@@ -156,6 +158,8 @@ const entrenamiento = req('./features/entrenamiento/guardarSesion.js');
 const guardarRutina = req('./features/entrenamiento/guardarRutina.js');
 const T = req('./features/entrenamiento/temporizador.js');
 const fPorciones = req('./features/comidas/porciones.js');
+const semillaCoccion = req('./db/seeds/coccion.js');
+const coccion = req('./lib/coccion.js');
 
 // El ciclo de imports se manifiesta aca: si schema -> migrations -> 00N -> schema,
 // el literal queda congelado en undefined al construirse el objeto.
@@ -463,6 +467,218 @@ await prueba('no se puede borrar un alimento en uso (RESTRICT)', async () => {
   await qComidas.crearComida({ id: 'c2', usuario_id: 'u1', fecha_hora: '2026-08-31T13:00:00-03:00', tipo: 'almuerzo' });
   await qComidas.agregarItem({ id: 'i2', comida_id: 'c2', alimento_id: 'a2', cantidad_g: 200 });
   await lanza(() => qAlimentos.eliminarAlimento('a2'), /FOREIGN KEY/i, 'alimento en uso');
+});
+
+// --- crudo y cocido ---------------------------------------------------------
+
+console.log('\ncrudo y cocido:');
+
+await prueba('la migracion 018 agrega las columnas de coccion', async () => {
+  const cols = async (t) =>
+    (await schema.getDb().getAllAsync(`PRAGMA table_info(${t})`)).map((c) => c.name);
+  const a = await cols('alimento');
+  for (const c of ['factor_coccion', 'estado_base', 'categorias_revisadas']) {
+    igual(a.includes(c), true, `alimento.${c}`);
+  }
+  const i = await cols('item_comida');
+  for (const c of ['estado_carga', 'cantidad_ingresada_g']) {
+    igual(i.includes(c), true, `item_comida.${c}`);
+  }
+  const fila = await schema.getDb().getFirstAsync(
+    "SELECT categorias_revisadas FROM alimento WHERE nombre = 'Arroz blanco cocido'");
+  igual(fila.categorias_revisadas, 0, 'categorias_revisadas arranca en 0');
+});
+
+await prueba('los CHECK de coccion rechazan valores invalidos', async () => {
+  const db = schema.getDb();
+  await lanza(
+    () => db.runAsync("UPDATE alimento SET factor_coccion = 0 WHERE nombre = 'Arroz blanco cocido'"),
+    /CHECK/i, 'factor cero');
+  await lanza(
+    () => db.runAsync("UPDATE alimento SET estado_base = 'frito' WHERE nombre = 'Arroz blanco cocido'"),
+    /CHECK/i, 'estado_base desconocido');
+  await lanza(
+    () => db.runAsync("UPDATE item_comida SET estado_carga = 'tibio' WHERE id = 'i2'"),
+    /CHECK/i, 'estado_carga desconocido');
+});
+
+// La regla que decide que entra: el cocido de USDA tiene que cerrar contra el
+// valor de la semilla con hasta 15% de diferencia. Sin excepciones a mano.
+await prueba('cada factor existe en la semilla y su par de USDA cierra (±15%)', () => {
+  const semilla = new Map(
+    [
+      ...alimentosAr.ALIMENTOS_AR,
+      ...alimentosLote2.ALIMENTOS_AR_LOTE2,
+      ...alimentosLote3.ALIMENTOS_AR_LOTE3,
+    ].map((a) => [a.nombre, a]),
+  );
+  const vistos = new Set();
+  for (const fila of semillaCoccion.FILAS_COCCION) {
+    const [nombre, , cocidoUsda] = fila;
+    igual(vistos.has(nombre), false, `${nombre} repetido en la tabla`);
+    vistos.add(nombre);
+    const a = semilla.get(nombre);
+    if (!a) throw new Error(`${nombre}: no esta en la semilla`);
+    const diferencia = Math.abs(a.kcal_por_100g - cocidoUsda) / cocidoUsda;
+    if (diferencia > 0.15) {
+      throw new Error(`${nombre}: semilla ${a.kcal_por_100g} vs USDA ${cocidoUsda} (${Math.round(diferencia * 100)}%)`);
+    }
+  }
+});
+
+await prueba('los factores quedan cargados en la semilla, en cocido', async () => {
+  const db = schema.getDb();
+  const de = (n) => db.getFirstAsync('SELECT factor_coccion, estado_base FROM alimento WHERE nombre = ?', [n]);
+  const arroz = await de('Arroz blanco cocido');
+  igual(arroz.factor_coccion, 2.81, 'arroz');
+  igual(arroz.estado_base, 'cocido', 'arroz en cocido');
+  igual((await de('Pechuga de pollo a la plancha')).factor_coccion, 0.73, 'pollo');
+  igual((await de('Porotos colorados cocidos')).factor_coccion, 2.65, 'colorados');
+  igual((await de('Carre de cerdo')).factor_coccion, 0.88, 'carre, par magro y grasa');
+  for (const sin of ['Milanesa de carne frita', 'Polenta cocida', 'Vacio', 'Bife de chorizo',
+    'Carne picada especial', 'Salmon a la plancha', 'Espinaca']) {
+    const f = await de(sin);
+    igual(f.factor_coccion, null, `${sin} sin factor`);
+    igual(f.estado_base, null, `${sin} sin estado base`);
+  }
+  const n = await db.getFirstAsync('SELECT count(*) AS n FROM alimento WHERE factor_coccion IS NOT NULL');
+  igual(n.n, semillaCoccion.FILAS_COCCION.length, 'una fila con factor por entrada de la tabla');
+  igual(await meta.leerMeta(db, 'semilla_coccion'), String(semillaCoccion.VERSION_COCCION), 'marca');
+});
+
+await prueba('el paso de factores no vuelve a correr si la version ya esta', async () => {
+  igual(await semillaCoccion.sembrarFactoresCoccion(schema.getDb()), 0, 'filas tocadas');
+});
+
+await prueba('una version nueva limpia lo que sale de la tabla y no toca homonimos del usuario', async () => {
+  const db = schema.getDb();
+  await qAlimentos.guardarAlimento({
+    id: 'homonimo-fideos', nombre: 'Fideos cocidos', kcal_por_100g: 170, fuente: 'manual',
+  });
+  // Un factor viejo en un alimento que ya no esta en la tabla.
+  await db.runAsync(
+    "UPDATE alimento SET factor_coccion = 1.5, estado_base = 'cocido' WHERE nombre = 'Milanesa de carne frita'");
+  await meta.escribirMeta(db, 'semilla_coccion', '0');
+
+  const n = await semillaCoccion.sembrarFactoresCoccion(db);
+  igual(n, semillaCoccion.FILAS_COCCION.length, 'filas con factor');
+  const mila = await db.getFirstAsync(
+    "SELECT factor_coccion FROM alimento WHERE nombre = 'Milanesa de carne frita'");
+  igual(mila.factor_coccion, null, 'el factor viejo se limpio');
+  const mio = await qAlimentos.obtenerAlimento('homonimo-fideos');
+  igual(mio.factor_coccion, null, 'el homonimo del usuario queda sin tocar');
+  await qAlimentos.eliminarAlimento('homonimo-fideos');
+});
+
+await prueba('guardarAlimento() no pisa la coccion si no se la pasan, y categorias_revisadas solo sube', async () => {
+  const base = {
+    nombre: 'Fideos tirabuzon', codigo_barras: '7790000000017', kcal_por_100g: 350,
+    fuente: 'open_food_facts',
+  };
+  await qAlimentos.guardarAlimento({
+    ...base, id: 'off-1', coccion: { estado_base: 'crudo', factor_coccion: 2.35 },
+    categorias_revisadas: true,
+  });
+  // Como corregir los macros: un segundo guardado que no sabe de coccion.
+  let a = await qAlimentos.guardarAlimento({ ...base, id: 'off-2', kcal_por_100g: 355 });
+  igual(a.kcal_por_100g, 355, 'se actualizo lo que si se paso');
+  igual(a.estado_base, 'crudo', 'estado_base intacto');
+  igual(a.factor_coccion, 2.35, 'factor intacto');
+  igual(a.categorias_revisadas, 1, 'categorias_revisadas no vuelve a 0');
+
+  a = await qAlimentos.guardarAlimento({ ...base, id: 'off-3', coccion: null });
+  igual(a.factor_coccion, null, 'coccion null la borra a proposito');
+  await qAlimentos.eliminarAlimento(a.id);
+});
+
+await prueba('completarCategoriasEscaneado() marca revisado y completa la coccion', async () => {
+  const viejo = await qAlimentos.guardarAlimento({
+    id: 'off-viejo', nombre: 'Arroz largo fino', codigo_barras: '7790000000024',
+    kcal_por_100g: 355, fuente: 'open_food_facts',
+  });
+  igual(viejo.categorias_revisadas, 0, 'un escaneado de antes arranca sin revisar');
+
+  const porciones = fPorciones.generarPorcionesPaquete(70, '1 kg');
+  await qAlimentos.completarCategoriasEscaneado(viejo.id, {
+    estado_base: 'crudo', factor_coccion: 2.81, porciones,
+  });
+  const a = await qAlimentos.obtenerAlimento(viejo.id);
+  igual(a.categorias_revisadas, 1, 'revisado');
+  igual(a.estado_base, 'crudo', 'estado base');
+  igual(a.factor_coccion, 2.81, 'factor');
+  igual(a.porciones[0].nombre, '1 porcion (70 g seco)', 'porcion seca predeterminada');
+
+  const gaseosa = await qAlimentos.guardarAlimento({
+    id: 'off-gaseosa', nombre: 'Gaseosa lima', codigo_barras: '7790000000031',
+    kcal_por_100g: 40, fuente: 'open_food_facts',
+  });
+  await qAlimentos.completarCategoriasEscaneado(gaseosa.id, null);
+  const g = await qAlimentos.obtenerAlimento(gaseosa.id);
+  igual(g.categorias_revisadas, 1, 'sin coccion igual queda revisado');
+  igual(g.estado_base, null, 'y sin estado base');
+  await qAlimentos.eliminarAlimento(viejo.id);
+  await qAlimentos.eliminarAlimento(gaseosa.id);
+});
+
+await prueba('porciones de paquete: porcion seca predeterminada, medio y entero', () => {
+  const p = fPorciones.generarPorcionesPaquete(80, '500 g');
+  igual(p.map((x) => `${x.nombre}:${x.gramos}:${x.predeterminada}`).join('|'),
+    '1 porcion (80 g seco):80:true|Medio paquete (250 g):250:false|Paquete entero (500 g):500:false',
+    'fideos de 500 g');
+  igual(fPorciones.generarPorcionesPaquete(60, null).length, 1, 'sin quantity, solo la porcion');
+});
+
+await prueba('la regla de vasos queda solo para bebidas', () => {
+  const arroz = fPorciones.generarPorcionesAutomaticas('Arroz largo fino', null, '1 kg');
+  igual(arroz.some((p) => p.nombre.includes('vaso')), false, 'una bolsa de 1 kg no ofrece vasos');
+  igual(arroz.find((p) => p.predeterminada).gramos, 100, '100 g predeterminada');
+  const gaseosa = fPorciones.generarPorcionesAutomaticas('Gaseosa', null, '1.5 L');
+  igual(gaseosa[0].nombre, '1 vaso (250 g)', 'la gaseosa sigue con vaso');
+});
+
+// El punto de guardar cantidad_g en el estado base: ninguna query de totales
+// sabe nada de crudo o cocido, y no tiene que saberlo.
+await prueba('un item cargado en crudo suma lo mismo que su equivalente en cocido', async () => {
+  const [arroz] = await qAlimentos.buscarAlimentosPorNombre('Arroz blanco cocido', 1);
+  const cocidos = Math.round(
+    coccion.convertirAEstadoBase(300, 'crudo', arroz.estado_base, arroz.factor_coccion));
+  igual(cocidos, 843, '300 g crudos de arroz son 843 g cocidos');
+
+  await qComidas.crearComida({ id: 'c-crudo', usuario_id: 'u1', fecha_hora: '2026-09-10T13:00:00-03:00', tipo: 'almuerzo' });
+  await qComidas.crearComida({ id: 'c-cocido', usuario_id: 'u1', fecha_hora: '2026-09-11T13:00:00-03:00', tipo: 'almuerzo' });
+  await qComidas.agregarItem({
+    id: 'i-crudo', comida_id: 'c-crudo', alimento_id: arroz.id, cantidad_g: cocidos,
+    carga: { estado_carga: 'crudo', cantidad_ingresada_g: 300 },
+  });
+  await qComidas.agregarItem({ id: 'i-cocido', comida_id: 'c-cocido', alimento_id: arroz.id, cantidad_g: 843 });
+
+  const kcalDelDia = async (dia) => {
+    const filas = await qComidas.listarItemsConAlimentoPorRango('u1', dia, dia);
+    return filas.reduce((s, f) => s + (f.kcal_por_100g * f.cantidad_g) / 100, 0);
+  };
+  igual(await kcalDelDia('2026-09-10'), await kcalDelDia('2026-09-11'), 'mismo total');
+  igual(Math.round(await kcalDelDia('2026-09-10')), 1096, '843 g x 130 kcal/100 g');
+
+  const [item] = await qComidas.listarItemsConAlimento('c-crudo');
+  igual(item.estado_carga, 'crudo', 'estado_carga');
+  igual(item.cantidad_ingresada_g, 300, 'lo que se peso');
+  igual(item.factor_coccion, 2.81, 'el JOIN trae el factor');
+  igual(item.estado_base, 'cocido', 'y el estado base');
+});
+
+await prueba('actualizarItem() con carga null vuelve al estado base', async () => {
+  await qComidas.actualizarItem('i-crudo', { cantidad_g: 200, carga: null });
+  const [item] = await qComidas.listarItemsConAlimento('c-crudo');
+  igual(item.estado_carga, null, 'sin estado_carga');
+  igual(item.cantidad_ingresada_g, null, 'sin cantidad ingresada');
+  igual(item.cantidad_g, 200, 'cantidad nueva');
+  // Sin `carga` en los cambios, no se toca.
+  await qComidas.actualizarItem('i-crudo', { carga: { estado_carga: 'crudo', cantidad_ingresada_g: 100 } });
+  await qComidas.actualizarItem('i-crudo', { cantidad_g: 281 });
+  const [otra] = await qComidas.listarItemsConAlimento('c-crudo');
+  igual(otra.estado_carga, 'crudo', 'actualizar solo la cantidad no borra la carga');
+  await qComidas.eliminarComida('c-crudo');
+  await qComidas.eliminarComida('c-cocido');
 });
 
 // --- peso, eventos, sueno, energia -----------------------------------------

@@ -14,6 +14,7 @@
 import * as SQLite from 'expo-sqlite';
 import { migrar } from './migrations';
 import { sembrarAlimentos } from './seeds/alimentos';
+import { sembrarFactoresCoccion } from './seeds/coccion';
 import { sembrarEjercicios } from './seeds/ejercicios';
 import { sembrarRutinasPredefinidas } from './seeds/rutinas-predefinidas';
 
@@ -27,6 +28,8 @@ export type Objetivo = 'bajar' | 'mantener' | 'subir' | 'rendimiento';
 export type ModoNutricion = 'objetivo' | 'recuento';
 export type FuentePeso = 'manual' | 'balanza' | 'health_kit';
 export type FuenteAlimento = 'open_food_facts' | 'usda' | 'manual' | 'vision';
+/** En que estado estan los valores de un alimento, o en cual lo peso el usuario. */
+export type EstadoCoccion = 'crudo' | 'cocido';
 export type TipoComida = 'desayuno' | 'almuerzo' | 'merienda' | 'cena' | 'snack';
 export type TipoEvento = 'partido' | 'entrenamiento' | 'gimnasio' | 'competencia';
 export type Intensidad = 'baja' | 'media' | 'alta';
@@ -109,6 +112,12 @@ export interface AlimentoRow {
   porciones: string;
   /** Sin CHECK en el DDL: la lista crece sin migracion. 'otros' si no se sabe. */
   categoria: string;
+  /** Peso cocido / peso crudo. null si no aplica. Ver src/lib/coccion.ts. */
+  factor_coccion: number | null;
+  /** En que estado estan los valores por 100 g. null si no aplica. */
+  estado_base: EstadoCoccion | null;
+  /** 1 cuando ya se le pidieron las categorias a Open Food Facts. */
+  categorias_revisadas: Bool01;
   created_at: string;
   updated_at: string;
 }
@@ -130,8 +139,13 @@ export interface ItemComidaRow {
   id: string;
   comida_id: string;
   alimento_id: string;
+  /** SIEMPRE en el estado_base del alimento: de aca salen todos los totales. */
   cantidad_g: number;
   editado_por_usuario: Bool01;
+  /** En que estado lo peso el usuario. null = en el estado base, lo de siempre. */
+  estado_carga: EstadoCoccion | null;
+  /** Lo que peso de verdad ("300 g crudo"). Solo para mostrar. */
+  cantidad_ingresada_g: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -352,6 +366,8 @@ export async function initDb(nombre: string = NOMBRE_DB): Promise<SQLite.SQLiteD
   // SELECT COUNT(*) y nada mas. Va antes de asignar `conexion` porque recibe
   // `db` por parametro: getDb() todavia tiraria.
   await sembrarAlimentos(db);
+  // Despues de los alimentos: les pone el factor a filas que la semilla crea.
+  await sembrarFactoresCoccion(db);
   await sembrarEjercicios(db);
   // Despues de los ejercicios: las rutinas los referencian por nombre.
   await sembrarRutinasPredefinidas(db);

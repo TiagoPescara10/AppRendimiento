@@ -10,7 +10,7 @@
 // Ningun total de kcal ni de macros se calcula aca: esto devuelve filas.
 
 import { getDb } from '../schema';
-import type { ComidaRow, ItemComidaRow, TipoComida } from '../schema';
+import type { ComidaRow, EstadoCoccion, ItemComidaRow, TipoComida } from '../schema';
 
 const ahora = (): string => new Date().toISOString();
 
@@ -132,8 +132,17 @@ export interface NuevoItemComida {
   id: string;
   comida_id: string;
   alimento_id: string;
+  /** En el estado_base del alimento. Ver src/lib/coccion.ts. */
   cantidad_g: number;
   editado_por_usuario?: boolean;
+  /** Solo si el usuario peso en un estado distinto del base del alimento. */
+  carga?: CargaCoccion | null;
+}
+
+/** Lo que el usuario peso de verdad, cuando no fue en el estado base. Solo para mostrar. */
+export interface CargaCoccion {
+  estado_carga: EstadoCoccion;
+  cantidad_ingresada_g: number;
 }
 
 /** Fila de item con los datos del alimento pegados. Lo que necesita el detalle. */
@@ -145,20 +154,25 @@ export interface ItemComidaConAlimento extends ItemComidaRow {
   carbohidratos_g: number;
   grasa_g: number;
   fibra_g: number | null;
+  factor_coccion: number | null;
+  estado_base: EstadoCoccion | null;
 }
 
 export async function agregarItem(datos: NuevoItemComida): Promise<ItemComidaRow> {
   const t = ahora();
   await getDb().runAsync(
     `INSERT INTO item_comida
-       (id, comida_id, alimento_id, cantidad_g, editado_por_usuario, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (id, comida_id, alimento_id, cantidad_g, editado_por_usuario,
+        estado_carga, cantidad_ingresada_g, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       datos.id,
       datos.comida_id,
       datos.alimento_id,
       datos.cantidad_g,
       datos.editado_por_usuario ? 1 : 0,
+      datos.carga?.estado_carga ?? null,
+      datos.carga?.cantidad_ingresada_g ?? null,
       t,
       t,
     ],
@@ -191,7 +205,9 @@ export async function listarItemsConAlimento(
        a.proteina_g      AS proteina_g,
        a.carbohidratos_g AS carbohidratos_g,
        a.grasa_g         AS grasa_g,
-       a.fibra_g         AS fibra_g
+       a.fibra_g         AS fibra_g,
+       a.factor_coccion  AS factor_coccion,
+       a.estado_base     AS estado_base
      FROM item_comida i
      JOIN alimento a ON a.id = i.alimento_id
      WHERE i.comida_id = ?
@@ -234,7 +250,9 @@ export async function listarItemsConAlimentoPorRango(
        a.proteina_g      AS proteina_g,
        a.carbohidratos_g AS carbohidratos_g,
        a.grasa_g         AS grasa_g,
-       a.fibra_g         AS fibra_g
+       a.fibra_g         AS fibra_g,
+       a.factor_coccion  AS factor_coccion,
+       a.estado_base     AS estado_base
      FROM item_comida i
      JOIN comida c   ON c.id = i.comida_id
      JOIN alimento a ON a.id = i.alimento_id
@@ -246,10 +264,15 @@ export async function listarItemsConAlimentoPorRango(
 
 export async function actualizarItem(
   id: string,
-  cambios: { cantidad_g?: number; editado_por_usuario?: boolean },
+  cambios: {
+    cantidad_g?: number;
+    editado_por_usuario?: boolean;
+    /** null borra la carga: el item vuelve a estar pesado en el estado base. */
+    carga?: CargaCoccion | null;
+  },
 ): Promise<void> {
   const campos: string[] = [];
-  const valores: (string | number)[] = [];
+  const valores: (string | number | null)[] = [];
 
   if (cambios.cantidad_g !== undefined) {
     campos.push('cantidad_g = ?');
@@ -258,6 +281,10 @@ export async function actualizarItem(
   if (cambios.editado_por_usuario !== undefined) {
     campos.push('editado_por_usuario = ?');
     valores.push(cambios.editado_por_usuario ? 1 : 0);
+  }
+  if (cambios.carga !== undefined) {
+    campos.push('estado_carga = ?', 'cantidad_ingresada_g = ?');
+    valores.push(cambios.carga?.estado_carga ?? null, cambios.carga?.cantidad_ingresada_g ?? null);
   }
   if (campos.length === 0) return;
 

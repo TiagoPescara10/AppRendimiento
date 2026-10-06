@@ -10,7 +10,7 @@
 // interno; si aparece en un import de fuera de db/, es un bug.
 
 import { getDb } from '../schema';
-import type { AlimentoRow, FuenteAlimento, PorcionTipica } from '../schema';
+import type { AlimentoRow, EstadoCoccion, FuenteAlimento, PorcionTipica } from '../schema';
 
 const ahora = (): string => new Date().toISOString();
 
@@ -68,6 +68,14 @@ export interface NuevoAlimento {
   verificado?: boolean;
   porciones?: PorcionTipica[];
   categoria?: string;
+  /**
+   * Crudo/cocido. undefined = no tocar lo que ya tenga la fila (un segundo
+   * guardado que no sabe nada de coccion, como corregir los macros, no tiene
+   * que borrarla). null = no aplica.
+   */
+  coccion?: { estado_base: EstadoCoccion; factor_coccion: number } | null;
+  /** true cuando ya se le pidieron las categorias a Open Food Facts. Nunca vuelve a false. */
+  categorias_revisadas?: boolean;
 }
 
 /**
@@ -78,14 +86,19 @@ export interface NuevoAlimento {
  * El `WHERE codigo_barras IS NOT NULL` del ON CONFLICT no es adorno: cuando el
  * indice es parcial, SQLite exige que el target repita su WHERE. Sin eso tira
  * "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint".
+ *
+ * La coccion solo se pisa si el que llama la trae (ver NuevoAlimento), y
+ * categorias_revisadas solo sube: MAX() para que un guardado posterior que no
+ * sabe de categorias no vuelva a mandar el producto a revisar.
  */
 export async function guardarAlimento(datos: NuevoAlimento): Promise<Alimento> {
   const t = ahora();
   await getDb().runAsync(
     `INSERT INTO alimento
        (id, nombre, marca, codigo_barras, kcal_por_100g, proteina_g, carbohidratos_g,
-        grasa_g, fibra_g, fuente, verificado, porciones, categoria, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        grasa_g, fibra_g, fuente, verificado, porciones, categoria,
+        factor_coccion, estado_base, categorias_revisadas, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(codigo_barras) WHERE codigo_barras IS NOT NULL DO UPDATE SET
        nombre          = excluded.nombre,
        marca           = excluded.marca,
@@ -98,6 +111,9 @@ export async function guardarAlimento(datos: NuevoAlimento): Promise<Alimento> {
        verificado      = excluded.verificado,
        porciones       = excluded.porciones,
        categoria       = excluded.categoria,
+       factor_coccion  = CASE WHEN ? THEN excluded.factor_coccion ELSE alimento.factor_coccion END,
+       estado_base     = CASE WHEN ? THEN excluded.estado_base ELSE alimento.estado_base END,
+       categorias_revisadas = MAX(alimento.categorias_revisadas, excluded.categorias_revisadas),
        updated_at      = excluded.updated_at`,
     [
       datos.id,
@@ -113,8 +129,13 @@ export async function guardarAlimento(datos: NuevoAlimento): Promise<Alimento> {
       datos.verificado ? 1 : 0,
       JSON.stringify(datos.porciones ?? []),
       datos.categoria ?? 'otros',
+      datos.coccion?.factor_coccion ?? null,
+      datos.coccion?.estado_base ?? null,
+      datos.categorias_revisadas ? 1 : 0,
       t,
       t,
+      datos.coccion !== undefined ? 1 : 0,
+      datos.coccion !== undefined ? 1 : 0,
     ],
   );
 
@@ -124,6 +145,34 @@ export async function guardarAlimento(datos: NuevoAlimento): Promise<Alimento> {
     : await obtenerAlimento(datos.id);
   if (!fila) throw new Error(`No se pudo leer el alimento recien guardado: ${datos.id}`);
   return fila;
+}
+
+/**
+ * Cierra la revision de categorias de un producto escaneado: lo marca como
+ * revisado y, si se detecto que se cocina, le completa estado base, factor y
+ * las porciones de paquete.
+ *
+ * Es para los productos guardados antes de que existiera la coccion. Nunca se
+ * llama si la consulta a la red fallo: en ese caso queda en 0 y se reintenta
+ * en el proximo escaneo.
+ */
+export async function completarCategoriasEscaneado(
+  id: string,
+  coccion: { estado_base: EstadoCoccion; factor_coccion: number; porciones: PorcionTipica[] } | null,
+): Promise<void> {
+  if (!coccion) {
+    await getDb().runAsync(
+      'UPDATE alimento SET categorias_revisadas = 1, updated_at = ? WHERE id = ?',
+      [ahora(), id],
+    );
+    return;
+  }
+  await getDb().runAsync(
+    `UPDATE alimento
+       SET categorias_revisadas = 1, estado_base = ?, factor_coccion = ?, porciones = ?, updated_at = ?
+     WHERE id = ?`,
+    [coccion.estado_base, coccion.factor_coccion, JSON.stringify(coccion.porciones), ahora(), id],
+  );
 }
 
 export async function eliminarAlimento(id: string): Promise<void> {

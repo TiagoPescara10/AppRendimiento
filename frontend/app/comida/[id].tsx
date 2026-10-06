@@ -4,6 +4,9 @@
 // Sobre las porciones: item_comida solo guarda cantidad_g, no el nombre de la
 // porcion. Se reconstruye comparando los gramos contra las porciones del
 // alimento; cuando no coincide ninguna, cae en mostrar los gramos pelados.
+//
+// Un item pesado en el otro estado (estado_carga) se muestra con lo que se
+// peso de verdad, "300 g crudo", y no con los gramos convertidos.
 
 import { useState, useCallback } from 'react';
 import {
@@ -28,7 +31,8 @@ import {
   eliminarItem as eliminarItemDb,
   eliminarComida,
 } from '@/db/queries/comidas';
-import type { ItemComidaConAlimento } from '@/db/queries/comidas';
+import type { CargaCoccion, ItemComidaConAlimento } from '@/db/queries/comidas';
+import { textoCantidadIngresada } from '@/lib/coccion';
 import type { ComidaRow, PorcionTipica } from '@/db/schema';
 import { obtenerAlimento } from '@/db/queries/alimentos';
 
@@ -153,10 +157,12 @@ export default function DetalleComida() {
    * no servia. Cuando exista el registro por foto, esa marca dice que tan
    * seguido se equivoca el modelo.
    */
-  const cambiarCantidad = async (cantidad_g: number) => {
+  const cambiarCantidad = async (cantidad_g: number, _porcion: string, carga: CargaCoccion | null) => {
     if (!editando) return;
     try {
-      await actualizarItem(editando.id, { cantidad_g, editado_por_usuario: true });
+      // La carga se escribe siempre, tambien en null: si antes se habia pesado
+      // crudo y ahora se eligio una porcion, el "300 g crudo" ya no vale.
+      await actualizarItem(editando.id, { cantidad_g, editado_por_usuario: true, carga });
       setEditando(null);
       await cargar();
     } catch (e) {
@@ -201,7 +207,13 @@ export default function DetalleComida() {
     nombre: editando.alimento_nombre,
     kcal_por_100g: editando.kcal_por_100g,
     porciones: editando.porciones,
+    estado_base: editando.estado_base,
+    factor_coccion: editando.factor_coccion,
     cantidadActual: editando.cantidad_g,
+    cargaActual:
+      editando.estado_carga && editando.cantidad_ingresada_g
+        ? { estado_carga: editando.estado_carga, cantidad_ingresada_g: editando.cantidad_ingresada_g }
+        : null,
     onQuitar: quitarItem,
   };
 
@@ -260,7 +272,9 @@ export default function DetalleComida() {
                 <View>
                   <Text style={estilos.alimentoNombre}>{item.alimento_nombre}</Text>
                   <Text style={estilos.alimentoPorcion}>
-                    {etiquetaCantidad(item.porciones, item.cantidad_g)}
+                    {item.estado_carga && item.cantidad_ingresada_g
+                      ? textoCantidadIngresada(item.cantidad_ingresada_g, item.estado_carga, item.estado_base)
+                      : etiquetaCantidad(item.porciones, item.cantidad_g)}
                   </Text>
                 </View>
 

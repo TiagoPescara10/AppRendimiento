@@ -110,9 +110,10 @@ export function generarPorcionesAutomaticas(
     agregar(etiquetaServing, serving.gramos, true);
   }
 
-  // 2. Si hay quantity y es bebida o el envase supera los 500 g:
-  // Ofrecer fracciones utiles: 1 vaso (250 g), medio litro (500 g) y envase entero
-  if (envase && (esBebida || envase.gramos > 500)) {
+  // 2. Si hay quantity y es bebida: fracciones utiles, 1 vaso (250 g), medio
+  // litro (500 g) y envase entero. SOLO bebidas: antes alcanzaba con que el
+  // envase pasara los 500 g, y una bolsa de arroz de 1 kg ofrecia "1 vaso".
+  if (envase && esBebida) {
     const vasoPred = !serving && envase.gramos >= 250;
     agregar('1 vaso (250 g)', 250, vasoPred);
 
@@ -127,9 +128,14 @@ export function generarPorcionesAutomaticas(
         ? `Botella entera (${(envase.gramos / 1000).toFixed(1).replace('.0', '')} L)`
         : `Envase entero (${envase.gramos} g)`;
     agregar(etiquetaEnvase, envase.gramos, envasePred);
-  } else if (envase && envase.gramos <= 500) {
-    // 3. Si el envase es chico (<= 500 g), ofrecer el envase entero
-    const envasePred = !serving;
+  } else if (envase) {
+    // 3. Si no es bebida, ofrecer el envase entero. Los productos que se
+    // cocinan no pasan por aca: tienen sus propias porciones, ver
+    // generarPorcionesPaquete().
+    // Un envase grande no se come entero: sin porcion sugerida, 100 g va
+    // primero y predeterminada.
+    const envasePred = !serving && envase.gramos <= 500;
+    if (!serving && envase.gramos > 500) agregar('100 g', 100, true);
     agregar(`Envase entero (${envase.gramos} g)`, envase.gramos, envasePred);
   }
 
@@ -148,6 +154,41 @@ export function generarPorcionesAutomaticas(
     }
   }
 
+  return porciones;
+}
+
+/**
+ * Porciones de un paquete que se cocina (fideos, arroz, legumbres secas). Los
+ * gramos son SECOS, que es el estado de los valores del paquete.
+ *
+ *   1 porcion (80 g seco)   <- predeterminada
+ *   Medio paquete (250 g)
+ *   Paquete entero (500 g)
+ *
+ * Sin quantity legible queda solo la porcion. Medio paquete se omite si no es
+ * mas grande que la porcion.
+ */
+export function generarPorcionesPaquete(
+  porcionSecaG: number,
+  quantityStr?: string | null,
+): PorcionTipica[] {
+  const porciones: PorcionTipica[] = [
+    { nombre: `1 porcion (${porcionSecaG} g seco)`, gramos: porcionSecaG, predeterminada: true },
+  ];
+  const envase = parsearCantidadTexto(quantityStr);
+  if (!envase) return porciones;
+
+  const medio = Math.round(envase.gramos / 2);
+  if (medio > porcionSecaG) {
+    porciones.push({ nombre: `Medio paquete (${medio} g)`, gramos: medio, predeterminada: false });
+  }
+  if (envase.gramos > porcionSecaG) {
+    porciones.push({
+      nombre: `Paquete entero (${envase.gramos} g)`,
+      gramos: envase.gramos,
+      predeterminada: false,
+    });
+  }
   return porciones;
 }
 

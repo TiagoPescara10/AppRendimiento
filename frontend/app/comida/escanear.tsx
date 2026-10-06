@@ -20,12 +20,23 @@
 // "1 pote (190 g)", "250 cc", "6 x 330 ml" o dejarlos vacios.
 // Por eso el parseo es defensivo:
 // - Si hay serving_size parseable, esa es la predeterminada.
-// - Si hay quantity y es bebida o envase > 500 g, se generan fracciones utiles
-//   (1 vaso 250 g, medio litro 500 g, envase entero). Nadie toma 2,5 L de una vez.
+// - Si hay quantity y es bebida, se generan fracciones utiles (1 vaso 250 g,
+//   medio litro 500 g, envase entero). Nadie toma 2,5 L de una vez. SOLO
+//   bebidas: una bolsa de arroz de 1 kg no ofrece vasos.
 // - Si el envase es chico (<= 500 g), se ofrece el envase entero como predeterminada.
 // - Si no hay datos parseables, cae en 100 g como predeterminada.
 // - Al guardar con guardarAlimento (UPSERT por codigo de barras), esas porciones
 //   quedan persistidas en la columna porciones para siempre.
+//
+// NOTA SOBRE PRODUCTOS QUE SE COCINAN (fideos, arroz, legumbres secas):
+// Los valores de Open Food Facts son del producto como se vende, o sea SECO.
+// Con categories_tags se detecta si se cocina (src/lib/coccion.ts): en ese caso
+// el alimento queda con estado_base 'crudo' y un factor por categoria, las
+// porciones pasan a ser "1 porcion (80 g seco) / medio paquete / paquete
+// entero", y aparece el selector de seco o cocido.
+// Los productos guardados antes de esto se revisan una sola vez, la proxima vez
+// que se escanean (categorias_revisadas). Si la red falla queda en 0 y se
+// reintenta en el siguiente escaneo. Nunca bloquea la pantalla.
 //
 // TODO: Integrar expo-camera con escaneo real en vivo.
 // Requiere development build (no disponible directamente en Expo Go estandar).
@@ -51,15 +62,27 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, spacing, radius, fontSize, fontWeight, lineHeight, shadow, sizes } from '@/ui/theme';
-import type { TipoComida, PorcionTipica, FuenteAlimento } from '@/db/schema';
+import type { TipoComida, PorcionTipica, FuenteAlimento, EstadoCoccion } from '@/db/schema';
 import { getDb } from '@/db/schema';
-import { guardarAlimento, obtenerAlimentoPorCodigoBarras } from '@/db/queries/alimentos';
+import {
+  completarCategoriasEscaneado,
+  guardarAlimento,
+  obtenerAlimentoPorCodigoBarras,
+} from '@/db/queries/alimentos';
 import {
   TOPE_GRAMOS_MAX,
   parsearCantidadTexto,
   esProbableBebida,
   generarPorcionesAutomaticas,
+  generarPorcionesPaquete,
 } from '@/features/comidas/porciones';
+import {
+  admiteCoccion,
+  convertirAEstadoBase,
+  detectarCoccion,
+  opcionesCoccion,
+  textoEquivalencia,
+} from '@/lib/coccion';
 import { crearComida, agregarItem } from '@/db/queries/comidas';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import { randomUUID } from '@/db/sync/uuid';
@@ -94,6 +117,41 @@ interface ProductoNormalizado {
   porciones: PorcionTipica[];
   fuente?: FuenteAlimento;
   verificado?: boolean;
+  /** Solo si el producto se cocina: sus valores son de SECO. */
+  coccion: { estado_base: EstadoCoccion; factor_coccion: number } | null;
+}
+
+const URL_PRODUCTO = 'https://world.openfoodfacts.org/api/v2/product/';
+const CABECERAS_OFF = { 'User-Agent': 'AppRendimiento - Mobile App' };
+
+/**
+ * Pide solo categorias y envase de un producto. Para revisar los que se
+ * guardaron antes de que existiera la coccion. null si la red falla o el
+ * producto no esta: en ese caso no se marca nada y se reintenta despues.
+ */
+async function pedirCategorias(
+  codigo: string,
+): Promise<{ categorias: string[]; quantity: string | null } | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(
+      `${URL_PRODUCTO}${encodeURIComponent(codigo)}.json?fields=categories_tags,quantity`,
+      { signal: controller.signal, headers: CABECERAS_OFF },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || data.status !== 1 || !data.product) return null;
+    const tags = Array.isArray(data.product.categories_tags) ? data.product.categories_tags : [];
+    return {
+      categorias: tags.filter((t: unknown): t is string => typeof t === 'string'),
+      quantity: typeof data.product.quantity === 'string' ? data.product.quantity : null,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export default function PantallaEscanear() {
@@ -125,6 +183,9 @@ export default function PantallaEscanear() {
   const [gramos, setGramos] = useState<number>(100);
   const [modalEditarGramos, setModalEditarGramos] = useState(false);
   const [textoGramosEdit, setTextoGramosEdit] = useState('100');
+  // En que estado peso el usuario. `gramos` esta en ESTE estado; lo que se
+  // guarda en cantidad_g se convierte al estado base del producto.
+  const [estado, setEstado] = useState<EstadoCoccion>('crudo');
 
   // Modal para escribir el codigo de barras a mano
   const [modalCodigoManual, setModalCodigoManual] = useState(false);
@@ -139,6 +200,43 @@ export default function PantallaEscanear() {
 
   // Estado de guardado en la base de datos
   const [guardando, setGuardando] = useState(false);
+
+  /**
+   * Revision unica de categorias para un producto guardado antes de la
+   * coccion. Corre en segundo plano: la pantalla ya muestra el producto.
+   * Si se detecta que se cocina, se completa la fila y se actualiza lo que
+   * se esta viendo; si los gramos seguian en la porcion predeterminada vieja,
+   * pasan a la nueva.
+   */
+  const revisarCategorias = async (
+    alimentoId: string,
+    codigo: string,
+    predAnterior: number,
+  ) => {
+    const r = await pedirCategorias(codigo);
+    if (!r) return; // sin red: queda en 0 y se reintenta en el proximo escaneo
+
+    const det = detectarCoccion(r.categorias);
+    const porciones = det ? generarPorcionesPaquete(det.porcionSecaG, r.quantity) : null;
+    const coccion = det ? { estado_base: 'crudo' as const, factor_coccion: det.factor } : null;
+
+    try {
+      await completarCategoriasEscaneado(
+        alimentoId,
+        coccion && porciones ? { ...coccion, porciones } : null,
+      );
+    } catch (e) {
+      console.warn('No se pudo completar la revision de categorias:', e);
+      return;
+    }
+    if (!coccion || !porciones) return;
+
+    setProducto((prev) =>
+      prev && prev.codigo === codigo ? { ...prev, coccion, porciones } : prev,
+    );
+    setEstado('crudo');
+    setGramos((g) => (g === predAnterior ? porciones[0].gramos : g));
+  };
 
   // -------------------------------------------------------------
   // Consulta real a Open Food Facts con timeout de 10 segundos
@@ -176,10 +274,22 @@ export default function PantallaEscanear() {
           porciones: porcionesExistentes,
           fuente: existente.fuente,
           verificado: Boolean(existente.verificado),
+          coccion:
+            existente.estado_base && existente.factor_coccion
+              ? { estado_base: existente.estado_base, factor_coccion: existente.factor_coccion }
+              : null,
         });
         setGramos(gramosIniciales);
         setTextoGramosEdit(String(gramosIniciales));
+        setEstado(existente.estado_base ?? 'crudo');
         setEstadoConsulta('detectado');
+
+        // Guardado antes de que existiera la coccion: se revisa una sola vez.
+        // Tambien los corregidos a mano (fuente 'manual' con codigo): siguen
+        // siendo un producto de Open Food Facts, con sus valores de paquete.
+        if (existente.codigo_barras && !existente.categorias_revisadas) {
+          void revisarCategorias(existente.id, existente.codigo_barras, gramosIniciales);
+        }
         return;
       }
     } catch (errDb) {
@@ -190,13 +300,12 @@ export default function PantallaEscanear() {
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     try {
-      // Se solicitan quantity y serving_size ademas de macros
-      const url = `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(cod)}.json?fields=product_name,brands,nutriments,quantity,serving_size`;
+      // Se solicitan quantity y serving_size ademas de macros, y las
+      // categorias para saber si el producto se cocina.
+      const url = `${URL_PRODUCTO}${encodeURIComponent(cod)}.json?fields=product_name,brands,nutriments,quantity,serving_size,categories_tags`;
       const res = await fetch(url, {
         signal: controller.signal,
-        headers: {
-          'User-Agent': 'AppRendimiento - Mobile App',
-        },
+        headers: CABECERAS_OFF,
       });
 
       clearTimeout(timeoutId);
@@ -255,13 +364,16 @@ export default function PantallaEscanear() {
       const rawFiber = nutriments.fiber_100g;
       const fibraValida = typeof rawFiber === 'number' && !Number.isNaN(rawFiber) ? rawFiber : null;
 
-      // Generacion automatica de porciones tipicas segun quantity y serving_size
-      const porcionesGeneradas = generarPorcionesAutomaticas(
-        nombre,
-        prod.serving_size,
-        prod.quantity
+      // Si se cocina, porciones de paquete en seco. Si no, las automaticas
+      // segun quantity y serving_size. Un producto que se cocina nunca es bebida.
+      const det = detectarCoccion(
+        Array.isArray(prod.categories_tags) ? prod.categories_tags : null,
       );
-      const esBebida = esProbableBebida(nombre, prod.quantity, prod.serving_size);
+      const coccion = det ? { estado_base: 'crudo' as const, factor_coccion: det.factor } : null;
+      const porcionesGeneradas = det
+        ? generarPorcionesPaquete(det.porcionSecaG, prod.quantity)
+        : generarPorcionesAutomaticas(nombre, prod.serving_size, prod.quantity);
+      const esBebida = !det && esProbableBebida(nombre, prod.quantity, prod.serving_size);
 
       // Persistir inmediatamente en SQLite para que este disponible en todos los caminos
       try {
@@ -279,6 +391,8 @@ export default function PantallaEscanear() {
           verificado: false,
           porciones: porcionesGeneradas,
           categoria: esBebida ? 'bebidas' : 'otros',
+          coccion,
+          categorias_revisadas: true,
         });
       } catch (errDb) {
         console.error('Error al precargar alimento escaneado en SQLite:', errDb);
@@ -295,6 +409,7 @@ export default function PantallaEscanear() {
         fibra100g: fibraValida,
         macroFaltante: faltantes.length === 1 ? faltantes[0] : null,
         porciones: porcionesGeneradas,
+        coccion,
       };
 
       // Establecer como gramos iniciales la porcion predeterminada generada
@@ -304,6 +419,7 @@ export default function PantallaEscanear() {
       setProducto(prodNorm);
       setGramos(gramosIniciales);
       setTextoGramosEdit(String(gramosIniciales));
+      setEstado('crudo');
       setEstadoConsulta('detectado');
     } catch (err: unknown) {
       clearTimeout(timeoutId);
@@ -358,8 +474,10 @@ export default function PantallaEscanear() {
     if (!producto) return;
 
     try {
-      const esBebida = esProbableBebida(producto.nombre);
-      // Guardar en SQLite con fuente 'manual' y verificado en 1
+      const esBebida = !producto.coccion && esProbableBebida(producto.nombre);
+      // Guardar en SQLite con fuente 'manual' y verificado en 1. Sin `coccion`:
+      // corregir los macros no cambia si el producto se cocina, y asi no se
+      // pisa lo que haya completado la revision de categorias.
       await guardarAlimento({
         id: randomUUID(),
         nombre: producto.nombre,
@@ -445,7 +563,7 @@ export default function PantallaEscanear() {
         return;
       }
 
-      const esBebida = esProbableBebida(producto.nombre);
+      const esBebida = !producto.coccion && esProbableBebida(producto.nombre);
 
       await getDb().withTransactionAsync(async () => {
         // 1. Guardar o actualizar alimento con UPSERT por codigo_barras
@@ -475,18 +593,20 @@ export default function PantallaEscanear() {
           fecha_hora: aISOLocal(new Date()),
         });
 
-        // 3. Agregar el item a la comida
+        // 3. Agregar el item a la comida. cantidad_g va en el estado base del
+        // producto (seco); si se peso cocido, lo pesado queda aparte.
         await agregarItem({
           id: randomUUID(),
           comida_id: comidaId,
           alimento_id: alimentoGuardado.id,
-          cantidad_g: gramos,
+          cantidad_g: gramosBase,
+          carga: enOtroEstado ? { estado_carga: estado, cantidad_ingresada_g: gramos } : null,
         });
       });
 
       Alert.alert(
         'Alimento registrado',
-        `Se agregaron ${gramos} g de ${producto.nombre} a ${capitalizar(comida)}.`,
+        `Se agregaron ${gramos} g${enOtroEstado ? ' cocidos' : ''} de ${producto.nombre} a ${capitalizar(comida)}.`,
         [{ text: 'Listo', onPress: () => router.back() }]
       );
     } catch (e: unknown) {
@@ -516,8 +636,20 @@ export default function PantallaEscanear() {
     ejecutarGuardado();
   };
 
+  // Crudo/cocido. `gramos` esta en el estado que eligio el usuario; las
+  // cuentas y lo que se guarda van en el estado base del producto.
+  const baseCoccion = producto?.coccion?.estado_base ?? null;
+  const factorCoccion = producto?.coccion?.factor_coccion ?? null;
+  const conSelector = admiteCoccion(baseCoccion, factorCoccion);
+  const enOtroEstado = conSelector && estado !== baseCoccion;
+  const gramosBase = Math.round(convertirAEstadoBase(gramos, estado, baseCoccion, factorCoccion));
+  const equivalencia =
+    enOtroEstado && producto
+      ? textoEquivalencia(gramos, estado, baseCoccion, factorCoccion, producto.kcal100g)
+      : null;
+
   // Calculos de macros proporcionales a los gramos elegidos
-  const factor = gramos / 100;
+  const factor = gramosBase / 100;
   const calcKcal = producto ? Math.round(producto.kcal100g * factor) : 0;
   const calcProt = producto && producto.proteina100g !== null ? Math.round(producto.proteina100g * factor * 10) / 10 : null;
   const calcCarb = producto && producto.carbos100g !== null ? Math.round(producto.carbos100g * factor * 10) / 10 : null;
@@ -766,8 +898,31 @@ export default function PantallaEscanear() {
               </Text>
             </Pressable>
 
-            {/* Selector de porciones automaticas (chips horizontales) */}
-            {producto.porciones.length > 0 && (
+            {/* Seco o cocido, solo para productos que se cocinan */}
+            {conSelector && (
+              <View style={estilos.selectorCoccion}>
+                {opcionesCoccion(baseCoccion).map((o) => {
+                  const activo = o.estado === estado;
+                  return (
+                    <Pressable
+                      key={o.estado}
+                      style={[estilos.selectorOpcion, activo && estilos.selectorOpcionActiva]}
+                      onPress={() => setEstado(o.estado)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: activo }}
+                    >
+                      <Text style={[estilos.selectorTexto, activo && estilos.selectorTextoActivo]}>
+                        {o.etiqueta}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* Selector de porciones automaticas (chips horizontales). En el
+                otro estado no aplican: son porciones del paquete, en seco. */}
+            {!enOtroEstado && producto.porciones.length > 0 && (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -815,7 +970,7 @@ export default function PantallaEscanear() {
                   accessibilityLabel="Ingresar gramos exactos"
                 >
                   <Text style={estilos.stepperNumero}>{gramos}</Text>
-                  <Text style={estilos.stepperUnidad}>gramos</Text>
+                  <Text style={estilos.stepperUnidad}>{enOtroEstado ? 'g cocidos' : 'gramos'}</Text>
                 </Pressable>
 
                 <Pressable
@@ -827,6 +982,8 @@ export default function PantallaEscanear() {
                 </Pressable>
               </View>
             </View>
+
+            {equivalencia && <Text style={estilos.equivalenciaTexto}>{equivalencia}</Text>}
 
             {/* Mensaje del Coach Leon: tono estrictamente informativo */}
             <View style={estilos.cardCoach}>
@@ -1494,6 +1651,30 @@ const estilos = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
     paddingVertical: 2,
+  },
+  selectorCoccion: {
+    flexDirection: 'row',
+    padding: spacing.xs,
+    gap: spacing.xs,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+    marginBottom: spacing.sm,
+  },
+  selectorOpcion: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+  },
+  selectorOpcionActiva: { backgroundColor: colors.surface, ...shadow.card },
+  selectorTexto: { fontSize: fontSize.small, lineHeight: lineHeight.small, color: colors.textSecondary },
+  selectorTextoActivo: { color: colors.textPrimary, fontWeight: fontWeight.medium },
+  equivalenciaTexto: {
+    fontSize: fontSize.caption,
+    lineHeight: lineHeight.caption,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: spacing.xs,
   },
   chipPorcion: {
     paddingVertical: spacing.xs,

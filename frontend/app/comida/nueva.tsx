@@ -17,6 +17,7 @@ import { colors, spacing, radius, fontSize, fontWeight, lineHeight, shadow, size
 import { buscarAlimentosPorNombre, guardarAlimento } from '@/db/queries/alimentos';
 import type { Alimento } from '@/db/queries/alimentos';
 import { crearComida, agregarItem } from '@/db/queries/comidas';
+import type { CargaCoccion } from '@/db/queries/comidas';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import type { TipoComida } from '@/db/schema';
 import { randomUUID } from '@/db/sync/uuid';
@@ -26,12 +27,15 @@ import { aISOLocal } from '@/lib/fechas';
  * Un alimento agregado a la comida que todavia no se guardo. Se convierte en
  * fila de item_comida recien al tocar Guardar.
  *
- * `porcion` es solo para mostrar: lo que se persiste es cantidad_g.
+ * `porcion` es solo para mostrar: lo que se persiste es cantidad_g, en el
+ * estado base del alimento. `carga` es lo que se peso si fue en el otro
+ * estado ("300 g crudo").
  */
 type ItemPendiente = {
   alimento: Alimento;
   cantidad_g: number;
   porcion: string;
+  carga: CargaCoccion | null;
 };
 
 const TIPOS: TipoComida[] = ['desayuno', 'almuerzo', 'merienda', 'cena', 'snack'];
@@ -101,9 +105,9 @@ export default function NuevaComida() {
     return () => { vivo = false; };
   }, [busqueda]);
 
-  const confirmarPorcion = (cantidad_g: number, porcion: string) => {
+  const confirmarPorcion = (cantidad_g: number, porcion: string, carga: CargaCoccion | null) => {
     if (!sheet) return;
-    const nuevo: ItemPendiente = { alimento: sheet.alimento, cantidad_g, porcion };
+    const nuevo: ItemPendiente = { alimento: sheet.alimento, cantidad_g, porcion, carga };
 
     setItems((prev) =>
       sheet.indice === null
@@ -165,6 +169,7 @@ export default function NuevaComida() {
           alimento_id: item.alimento.id,
           cantidad_g: item.cantidad_g,
           editado_por_usuario: false,
+          carga: item.carga,
         });
       }
 
@@ -229,7 +234,10 @@ export default function NuevaComida() {
     kcal_por_100g: sheet.alimento.kcal_por_100g,
     porciones: sheet.alimento.porciones,
     categoria: sheet.alimento.categoria,
+    estado_base: sheet.alimento.estado_base,
+    factor_coccion: sheet.alimento.factor_coccion,
     cantidadActual: sheet.indice != null ? items[sheet.indice]?.cantidad_g : undefined,
+    cargaActual: sheet.indice != null ? items[sheet.indice]?.carga : null,
     onQuitar: sheet.indice != null ? quitarItem : undefined,
   };
 
@@ -324,8 +332,10 @@ export default function NuevaComida() {
             >
               <View style={estilos.flex}>
                 <Text style={estilos.nombre}>{item.alimento.nombre}</Text>
+                {/* Pesado en el otro estado: se muestra lo que se peso, no
+                    los gramos convertidos, que no los reconoceria nadie. */}
                 <Text style={estilos.porcion}>
-                  {item.porcion} · {item.cantidad_g} g
+                  {item.carga ? item.porcion : `${item.porcion} · ${item.cantidad_g} g`}
                 </Text>
               </View>
               <View style={estilos.derecha}>
