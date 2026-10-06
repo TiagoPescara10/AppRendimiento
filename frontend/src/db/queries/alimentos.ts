@@ -212,3 +212,16 @@ export async function buscarAlimentosPorNombre(
   );
   return filas.map(mapear);
 }
+
+/**
+ * El catalogo entero, para emparejar lo que vio la foto
+ * (src/features/foto/emparejar.ts). Son unas 850 filas: traerlas una vez y
+ * comparar en JS es lo que permite ignorar tildes y plurales, que el LIKE de
+ * buscarAlimentosPorNombre no hace.
+ */
+export async function listarAlimentosParaEmparejar(): Promise<Alimento[]> {
+  const filas = await getDb().getAllAsync<AlimentoRow>(
+    'SELECT * FROM alimento ORDER BY verificado DESC, nombre ASC',
+  );
+  return filas.map(mapear);
+}

@@ -30,7 +30,9 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env files. .env tambien: tiene la URL y la clave publica de Supabase,
+# que no son secretas pero son de este proyecto y no van al repo.
+.env
 .env*.local
 
 # typescript

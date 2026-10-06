@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet, Alert, Modal, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Input } from '@/ui/Input';
@@ -16,7 +17,7 @@ import { colors, spacing, radius, fontSize, fontWeight, lineHeight, shadow, size
 
 import { buscarAlimentosPorNombre, guardarAlimento } from '@/db/queries/alimentos';
 import type { Alimento } from '@/db/queries/alimentos';
-import { crearComida, agregarItem } from '@/db/queries/comidas';
+import { crearComidaConItems } from '@/db/queries/comidas';
 import type { CargaCoccion } from '@/db/queries/comidas';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import type { TipoComida } from '@/db/schema';
@@ -59,9 +60,17 @@ function capitalizar(texto: string): string {
 
 export default function NuevaComida() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ busqueda?: string; codigo?: string; marca?: string }>();
+  const params = useLocalSearchParams<{
+    busqueda?: string;
+    codigo?: string;
+    marca?: string;
+    /** Lo pasa la foto al volver con "Cargar a mano", para no perder el tipo. */
+    tipo?: string;
+  }>();
 
-  const [tipo, setTipo] = useState<TipoComida>(tipoPorHora);
+  const [tipo, setTipo] = useState<TipoComida>(() =>
+    TIPOS.includes(params.tipo as TipoComida) ? (params.tipo as TipoComida) : tipoPorHora(),
+  );
   const [selectorAbierto, setSelectorAbierto] = useState(false);
   const [busqueda, setBusqueda] = useState(params.busqueda ?? '');
   const [resultados, setResultados] = useState<Alimento[]>([]);
@@ -152,26 +161,22 @@ export default function NuevaComida() {
         return;
       }
 
-      const comidaId = randomUUID();
-      await crearComida({
-        id: comidaId,
-        usuario_id: perfil.id,
-        tipo,
-        fecha_hora: aISOLocal(new Date()),
-      });
-
-      // TODO: esto deberia ir en una transaccion. Si falla un item a la mitad,
-      // queda una comida incompleta guardada.
-      for (const item of items) {
-        await agregarItem({
+      // Comida e items en una sola transaccion: si falla uno, no queda nada.
+      await crearComidaConItems(
+        {
           id: randomUUID(),
-          comida_id: comidaId,
+          usuario_id: perfil.id,
+          tipo,
+          fecha_hora: aISOLocal(new Date()),
+        },
+        items.map((item) => ({
+          id: randomUUID(),
           alimento_id: item.alimento.id,
           cantidad_g: item.cantidad_g,
           editado_por_usuario: false,
           carga: item.carga,
-        });
-      }
+        })),
+      );
 
       router.back();
     } catch (e) {
@@ -180,6 +185,59 @@ export default function NuevaComida() {
     } finally {
       setGuardando(false);
     }
+  };
+
+  // --- Foto -----------------------------------------------------------------
+  //
+  // La foto se analiza en /comida/foto, que guarda su propia comida. Se entra
+  // con replace: al confirmar o cerrar, se vuelve a donde estaba el usuario
+  // antes de Registrar comida, no a esta pantalla vacia.
+
+  const abrirFoto = (asset: ImagePicker.ImagePickerAsset) => {
+    router.replace({
+      pathname: '/comida/foto',
+      params: { uri: asset.uri, ancho: String(asset.width), alto: String(asset.height), tipo },
+    });
+  };
+
+  const sacarFoto = async () => {
+    const permiso = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permiso.granted) {
+      Alert.alert('Sin acceso a la cámara', 'Podés habilitarlo desde los ajustes del teléfono.');
+      return;
+    }
+    const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.9 });
+    if (!r.canceled && r.assets[0]) abrirFoto(r.assets[0]);
+  };
+
+  // El selector de galeria del sistema no necesita permiso de lectura.
+  const elegirDeGaleria = async () => {
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9 });
+    if (!r.canceled && r.assets[0]) abrirFoto(r.assets[0]);
+  };
+
+  const elegirFoto = () => {
+    Alert.alert('Registrar con foto', undefined, [
+      { text: 'Sacar foto', onPress: sacarFoto },
+      { text: 'Elegir de la galería', onPress: elegirDeGaleria },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
+  };
+
+  // La foto guarda su propia comida: lo cargado aca sin guardar se perderia.
+  const tocarFoto = () => {
+    if (items.length === 0) {
+      elegirFoto();
+      return;
+    }
+    Alert.alert(
+      'Tenés alimentos sin guardar',
+      'La foto arma una comida nueva. Lo que cargaste acá se descarta.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Descartar y usar foto', style: 'destructive', onPress: elegirFoto },
+      ],
+    );
   };
 
   const guardarNuevoAlimentoManual = async () => {
@@ -254,7 +312,7 @@ export default function NuevaComida() {
         </Pressable>
       </View>
 
-      {/* Buscador + los dos accesos alternativos. Todavia no hacen nada. */}
+      {/* Buscador + los dos accesos alternativos: foto y codigo de barras. */}
       <View style={estilos.buscadorFila}>
         <View style={estilos.flex}>
           <Input
@@ -266,7 +324,8 @@ export default function NuevaComida() {
         </View>
         <Pressable
           style={estilos.accionChica}
-          onPress={() => Alert.alert('Próximamente', 'Registrar por foto todavía no está listo.')}
+          onPress={tocarFoto}
+          accessibilityLabel="Registrar con foto"
         >
           <Text style={estilos.accionIcono}>📷</Text>
         </Pressable>

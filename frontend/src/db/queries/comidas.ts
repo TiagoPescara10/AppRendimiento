@@ -297,3 +297,35 @@ export async function actualizarItem(
 export async function eliminarItem(id: string): Promise<void> {
   await getDb().runAsync('DELETE FROM item_comida WHERE id = ?', [id]);
 }
+
+// ---------------------------------------------------------------------------
+// Comida con sus items, de una vez
+// ---------------------------------------------------------------------------
+
+/** Un item de crearComidaConItems: como NuevoItemComida, sin comida_id. */
+export type ItemParaComida = Omit<NuevoItemComida, 'comida_id'>;
+
+/**
+ * Crea la comida y todos sus items en UNA transaccion: o queda todo, o no
+ * queda nada. Antes nueva.tsx los insertaba uno por uno y un error a la
+ * mitad dejaba una comida a medias.
+ *
+ * Usa agregarItem/crearComida adentro para que el SQL siga en un solo lugar;
+ * withTransactionAsync envuelve todo lo que corre en el callback.
+ */
+export async function crearComidaConItems(
+  comida: NuevaComida,
+  items: ItemParaComida[],
+): Promise<ComidaRow> {
+  if (items.length === 0) throw new Error('Una comida sin items no se guarda.');
+
+  let creada: ComidaRow | null = null;
+  await getDb().withTransactionAsync(async () => {
+    creada = await crearComida(comida);
+    for (const item of items) {
+      await agregarItem({ ...item, comida_id: comida.id });
+    }
+  });
+  if (!creada) throw new Error(`No se pudo crear la comida: ${comida.id}`);
+  return creada;
+}
