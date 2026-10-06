@@ -159,8 +159,11 @@ export default function FotoComida() {
     router.back();
   };
 
+  // A Registrar comida, sin la camara detras: dismissAll vuelve a las
+  // pestanas y desde ahi se abre el registro.
   const cargarAMano = () => {
-    router.replace({ pathname: '/comida/nueva', params: { tipo } });
+    router.dismissAll();
+    router.push({ pathname: '/comida/nueva', params: { tipo } });
   };
 
   const actualizar = (clave: string, cambio: (f: Fila) => Fila) => {
@@ -245,7 +248,8 @@ export default function FotoComida() {
           );
         },
       });
-      router.back();
+      // Al dashboard: atras quedaria la camara, y la comida ya esta guardada.
+      router.dismissAll();
     } catch (e) {
       console.error('Error al guardar la comida de la foto:', e);
       Alert.alert('Error', 'No se pudo guardar la comida.');

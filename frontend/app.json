@@ -45,8 +45,9 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "La cámara se usa para sacar la foto de fondo de la imagen que compartís de tu entrenamiento.",
-          "photosPermission": "La galería se usa para elegir la foto de fondo de la imagen que compartís de tu entrenamiento."
+          "cameraPermission": "La cámara se usa para sacar fotos de tus comidas, escanear códigos de barras y la foto de fondo de lo que compartís.",
+          "photosPermission": "La galería se usa para elegir fotos de tus comidas y la foto de fondo de lo que compartís.",
+          "microphonePermission": false
         }
       ],
       [
@@ -61,7 +62,14 @@
           "locationWhenInUsePermission": "La ubicación se usa para medir los km mientras corrés, caminás o andás en bici con el cronómetro."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "La cámara se usa para sacar fotos de tus comidas, escanear códigos de barras y la foto de fondo de lo que compartís.",
+          "recordAudioAndroid": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -60,6 +60,8 @@ interface Props {
   onCargarAMano: () => void;
   /** Despues de "Listo" en el aviso de guardado. */
   onGuardado: () => void;
+  /** Si viene, el sheet lleva una X: en la camara, para volver a escanear. */
+  onCerrar?: () => void;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -74,6 +76,7 @@ export function ResultadoCodigo({
   onReintentar,
   onCargarAMano,
   onGuardado,
+  onCerrar,
   style,
 }: Props) {
   // Selector de cantidad en el sheet
@@ -337,6 +340,17 @@ export function ResultadoCodigo({
     <>
         <View style={[estilos.bottomSheetContainer, style]}>
           <View style={estilos.sheetHandle} />
+          {onCerrar && consulta !== 'cargando' && (
+            <Pressable
+              onPress={onCerrar}
+              style={estilos.botonCerrarSheet}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Cerrar y escanear otro"
+            >
+              <Ionicons name="close" size={20} color={colors.textSecondary} />
+            </Pressable>
+          )}
 
           {/* ESTADO 1: CARGANDO */}
           {consulta === 'cargando' && (
@@ -925,6 +939,12 @@ const estilos = StyleSheet.create({
     backgroundColor: colors.borderStrong,
     alignSelf: 'center',
     marginBottom: spacing.md,
+  },
+  botonCerrarSheet: {
+    position: 'absolute',
+    top: spacing.md,
+    right: spacing.lg,
+    zIndex: 10,
   },
   sheetContenido: {
     gap: spacing.md,

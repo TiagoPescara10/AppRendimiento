@@ -5,8 +5,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, StyleSheet, Alert, Modal, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import type * as ImagePicker from 'expo-image-picker';
-import { elegirFotoDeGaleria, sacarFotoConCamara } from '@/features/permisos/asegurarPermiso';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Input } from '@/ui/Input';
@@ -65,8 +63,10 @@ export default function NuevaComida() {
     busqueda?: string;
     codigo?: string;
     marca?: string;
-    /** Lo pasa la foto al volver con "Cargar a mano", para no perder el tipo. */
+    /** Lo pasan la camara y la foto al volver, para no perder el tipo. */
     tipo?: string;
+    /** "1" si se vuelve de la camara sin permiso: el buscador arranca enfocado. */
+    enfocar?: string;
   }>();
 
   const [tipo, setTipo] = useState<TipoComida>(() =>
@@ -78,6 +78,14 @@ export default function NuevaComida() {
   const [items, setItems] = useState<ItemPendiente[]>([]);
   const [guardando, setGuardando] = useState(false);
   const buscador = useRef<TextInput>(null);
+
+  // Sin permiso de camara se vuelve aca para cargar a mano: el teclado ya
+  // abierto. Con un respiro, para que la transicion termine antes del foco.
+  useEffect(() => {
+    if (params.enfocar !== '1') return;
+    const t = setTimeout(() => buscador.current?.focus(), 350);
+    return () => clearTimeout(t);
+  }, [params.enfocar]);
 
   // Modal para dar de alta alimento manual si no esta en catalogo
   const [modalAltaManual, setModalAltaManual] = useState(false);
@@ -189,54 +197,30 @@ export default function NuevaComida() {
     }
   };
 
-  // --- Foto -----------------------------------------------------------------
+  // --- Camara ---------------------------------------------------------------
   //
-  // La foto se analiza en /comida/foto, que guarda su propia comida. Se entra
-  // con replace: al confirmar o cerrar, se vuelve a donde estaba el usuario
-  // antes de Registrar comida, no a esta pantalla vacia.
+  // Foto y codigo de barras son los dos modos de la camara de la app
+  // (/comida/camara), que guarda su propia comida. Se entra con replace: al
+  // confirmar o cerrar, se vuelve a donde estaba el usuario antes de
+  // Registrar comida, no a esta pantalla vacia. El permiso lo pide la camara;
+  // con "Ahora no" vuelve aca con el buscador enfocado (?enfocar=1).
 
-  const abrirFoto = (asset: ImagePicker.ImagePickerAsset) => {
-    router.replace({
-      pathname: '/comida/foto',
-      params: { uri: asset.uri, ancho: String(asset.width), alto: String(asset.height), tipo },
-    });
+  const irACamara = (modo: 'foto' | 'codigo') => {
+    router.replace({ pathname: '/comida/camara', params: { modo, tipo } });
   };
 
-  // Sin permiso no se queda trabado: con "Ahora no" queda el buscador
-  // enfocado para cargar a mano. Si se fue a Ajustes, al volver toca de nuevo.
-  const sacarFoto = async () => {
-    const { asset, permiso } = await sacarFotoConCamara({ mediaTypes: ['images'], quality: 0.9 });
-    if (asset) abrirFoto(asset);
-    else if (permiso === 'rechazado') buscador.current?.focus();
-  };
-
-  // El selector de galeria del sistema no necesita permiso de lectura; solo
-  // si falla por permiso se pide el de fotos (features/permisos).
-  const elegirDeGaleria = async () => {
-    const asset = await elegirFotoDeGaleria({ mediaTypes: ['images'], quality: 0.9 });
-    if (asset) abrirFoto(asset);
-  };
-
-  const elegirFoto = () => {
-    Alert.alert('Registrar con foto', undefined, [
-      { text: 'Sacar foto', onPress: sacarFoto },
-      { text: 'Elegir de la galería', onPress: elegirDeGaleria },
-      { text: 'Cancelar', style: 'cancel' },
-    ]);
-  };
-
-  // La foto guarda su propia comida: lo cargado aca sin guardar se perderia.
-  const tocarFoto = () => {
+  // La camara guarda su propia comida: lo cargado aca sin guardar se perderia.
+  const abrirCamara = (modo: 'foto' | 'codigo') => {
     if (items.length === 0) {
-      elegirFoto();
+      irACamara(modo);
       return;
     }
     Alert.alert(
       'Tenés alimentos sin guardar',
-      'La foto arma una comida nueva. Lo que cargaste acá se descarta.',
+      'La cámara arma una comida nueva. Lo que cargaste acá se descarta.',
       [
         { text: 'Cancelar', style: 'cancel' },
-        { text: 'Descartar y usar foto', style: 'destructive', onPress: elegirFoto },
+        { text: 'Descartar y seguir', style: 'destructive', onPress: () => irACamara(modo) },
       ],
     );
   };
@@ -326,14 +310,15 @@ export default function NuevaComida() {
         </View>
         <Pressable
           style={estilos.accionChica}
-          onPress={tocarFoto}
+          onPress={() => abrirCamara('foto')}
           accessibilityLabel="Registrar con foto"
         >
           <Text style={estilos.accionIcono}>📷</Text>
         </Pressable>
         <Pressable
           style={estilos.accionChica}
-          onPress={() => router.push('/comida/escanear')}
+          onPress={() => abrirCamara('codigo')}
+          accessibilityLabel="Escanear código de barras"
         >
           <Text style={estilos.accionIcono}>▥</Text>
         </Pressable>

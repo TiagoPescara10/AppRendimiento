@@ -186,6 +186,11 @@ export const colors = {
   controlOnCamara: 'rgba(255, 255, 255, 0.2)',
   controlOnCamaraPressed: 'rgba(255, 255, 255, 0.35)',
   bordeOnCamara: 'rgba(255, 255, 255, 0.25)',
+  // la camara de la app (app/comida/camara.tsx): el disparador blanco con su
+  // aro, y el destello corto al sacar la foto.
+  disparador: palette.white,
+  disparadorAro: 'rgba(255, 255, 255, 0.55)',
+  flashCamara: palette.white,
 
   // mascota leon
   avatarFondo: palette.leonFondo,
