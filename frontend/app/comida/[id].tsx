@@ -35,6 +35,8 @@ import type { CargaCoccion, ItemComidaConAlimento } from '@/db/queries/comidas';
 import { textoCantidadIngresada } from '@/lib/coccion';
 import type { ComidaRow, PorcionTipica } from '@/db/schema';
 import { obtenerAlimento } from '@/db/queries/alimentos';
+import { borrarFotoComida, fotoDisponible } from '@/features/foto/archivo';
+import { FotoDetalleComida } from '@/features/foto/components/FotoComida';
 
 function capitalizar(texto: string): string {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
@@ -191,8 +193,11 @@ export default function DetalleComida() {
         style: 'destructive',
         onPress: async () => {
           try {
-            // Los items caen solos por ON DELETE CASCADE.
+            // Los items caen solos por ON DELETE CASCADE. La foto es un
+            // archivo y no cae: se borra aparte, despues de la fila. Si ya no
+            // estaba, sigue sin error.
             await eliminarComida(id);
+            borrarFotoComida(comida?.foto_url);
             router.back();
           } catch (e) {
             console.error('Error al borrar la comida:', e);
@@ -227,6 +232,8 @@ export default function DetalleComida() {
     );
   }
 
+  const foto = fotoDisponible(comida?.foto_url);
+
   if (!comida) {
     return (
       <Pantalla>
@@ -246,6 +253,9 @@ export default function DetalleComida() {
           <Text style={estilos.detalle}>{horaDe(comida.fecha_hora)}</Text>
         </View>
       </View>
+
+      {/* Solo si se registro con foto y el archivo sigue estando. */}
+      {foto && <FotoDetalleComida uri={foto} />}
 
       {items.length === 0 ? (
         <View style={estilos.vacio}>

@@ -30,11 +30,18 @@ export type ResultadoFoto =
   | { ok: true; respuesta: RespuestaFoto }
   | { ok: false; error: ErrorFoto };
 
+export interface FotoPreparada {
+  /** Lo que se manda a analizar. */
+  base64: string;
+  /** El mismo JPEG en la cache: es el que se guarda con la comida. */
+  uri: string;
+}
+
 /**
- * JPEG en base64, con el lado mayor en 1024 px como mucho. Una foto de la
- * camara (12 MP, varios MB) queda en ~150-300 KB.
+ * JPEG con el lado mayor en 1024 px como mucho. Una foto de la camara
+ * (12 MP, varios MB) queda en ~150-300 KB.
  */
-export async function prepararFoto(uri: string, ancho: number, alto: number): Promise<string> {
+export async function prepararFoto(uri: string, ancho: number, alto: number): Promise<FotoPreparada> {
   const ctx = ImageManipulator.manipulate(uri);
   if (Math.max(ancho, alto) > LADO_MAYOR_PX) {
     ctx.resize(ancho >= alto ? { width: LADO_MAYOR_PX } : { height: LADO_MAYOR_PX });
@@ -46,7 +53,7 @@ export async function prepararFoto(uri: string, ancho: number, alto: number): Pr
     base64: true,
   });
   if (!guardada.base64) throw new Error('No se pudo leer la foto achicada.');
-  return guardada.base64;
+  return { base64: guardada.base64, uri: guardada.uri };
 }
 
 /** UUID que la app genera la primera vez y reusa siempre. */
@@ -59,13 +66,25 @@ export async function obtenerInstallId(): Promise<string> {
   return nuevo;
 }
 
-/** Nunca tira: todo error vuelve como { ok: false } para que la pantalla lo muestre. */
-export async function analizarFoto(base64: string): Promise<ResultadoFoto> {
+/**
+ * Nunca tira: todo error vuelve como { ok: false } para que la pantalla lo
+ * muestre. `cancelar` es el boton Cancelar de la pantalla: se suma al corte
+ * de los 30 s y vuelve como 'cancelado', que no es un error para mostrar.
+ *
+ * Sobre el cupo al cancelar: el Edge Runtime no le avisa a la funcion que el
+ * cliente se fue (ver supabase/functions/analizar-foto). Cancelar durante la
+ * subida no descuenta nada; despues, la foto cuenta igual.
+ */
+export async function analizarFoto(base64: string, cancelar?: AbortSignal): Promise<ResultadoFoto> {
   if (!supabaseConfigurado()) return { ok: false, error: 'no_configurado' };
 
   const installId = await obtenerInstallId();
+  if (cancelar?.aborted) return { ok: false, error: 'cancelado' };
+
   const control = new AbortController();
   const corte = setTimeout(() => control.abort(), TIMEOUT_FOTO_MS);
+  const alCancelar = () => control.abort();
+  cancelar?.addEventListener('abort', alCancelar);
 
   let res: Response;
   try {
@@ -81,9 +100,11 @@ export async function analizarFoto(base64: string): Promise<ResultadoFoto> {
     });
   } catch {
     // fetch solo tira por red o por el abort: un 4xx/5xx vuelve como res.
+    if (cancelar?.aborted) return { ok: false, error: 'cancelado' };
     return { ok: false, error: control.signal.aborted ? 'timeout' : 'sin_conexion' };
   } finally {
     clearTimeout(corte);
+    cancelar?.removeEventListener('abort', alCancelar);
   }
 
   let cuerpo: unknown = null;

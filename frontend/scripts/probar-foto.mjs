@@ -8,7 +8,8 @@
 //   2. emparejar.ts: de "milanesa, 200 g, cocido" a un alimento del catalogo.
 //      Con un catalogo chico armado aca y con el catalogo REAL de la semilla,
 //      que es contra el que va a emparejar la app.
-//   3. crearComidaConItems: la comida y sus items en una sola transaccion.
+//   3. crearComidaConItems: la comida y sus items en una sola transaccion, y
+//      guardarComidaConFoto: el orden archivo -> transaccion -> limpieza.
 
 process.env.TZ = 'America/Argentina/Buenos_Aires';
 
@@ -48,6 +49,7 @@ writeFileSync(
       join(RAIZ, 'src/db/**/*.ts'),
       join(RAIZ, 'src/features/foto/respuesta.ts'),
       join(RAIZ, 'src/features/foto/emparejar.ts'),
+      join(RAIZ, 'src/features/foto/guardar.ts'),
     ],
   }),
 );
@@ -75,6 +77,7 @@ instalarShim('expo-crypto', 'shim-expo-crypto.cjs');
 const req = createRequire(join(build, 'x.cjs'));
 const R = req('./features/foto/respuesta.js');
 const E = req('./features/foto/emparejar.js');
+const G = req('./features/foto/guardar.js');
 
 // --- corredor --------------------------------------------------------------
 
@@ -378,6 +381,78 @@ await prueba('si un item falla, no queda nada: ni la comida ni los items anterio
 await prueba('una comida sin items no se guarda', async () => {
   await lanza(() => qComidas.crearComidaConItems(comidaBase('c3'), []), 'vacia');
   igual(await qComidas.obtenerComida('c3'), null, 'sin comida');
+});
+
+// --- la foto: copiar, transaccion, limpiar ----------------------------------
+
+/** Dobles del archivo y la base que anotan lo que pasa y fallan a pedido. */
+function dobles({ copiaFalla = false, crearFalla = false } = {}) {
+  const log = [];
+  const archivos = new Set();
+  return {
+    log,
+    archivos,
+    deps: {
+      copiar: async (comidaId, uri) => {
+        log.push(`copiar ${uri}`);
+        if (copiaFalla) throw new Error('disco lleno');
+        const destino = `file:///docs/fotos-comida/${comidaId}.jpg`;
+        archivos.add(destino);
+        return destino;
+      },
+      borrar: (uri) => {
+        log.push(`borrar ${uri}`);
+        archivos.delete(uri);
+      },
+      crear: async (fotoUrl) => {
+        log.push(`crear ${fotoUrl}`);
+        if (crearFalla) throw new Error('transaccion fallida');
+      },
+    },
+  };
+}
+
+const callarWarn = async (fn) => {
+  const w = console.warn;
+  console.warn = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.warn = w;
+  }
+};
+
+await prueba('foto: se copia primero y la comida queda con la ruta guardada', async () => {
+  const d = dobles();
+  const url = await G.guardarComidaConFoto('c9', 'file:///cache/achicada.jpg', d.deps);
+  igual(url, 'file:///docs/fotos-comida/c9.jpg', 'ruta');
+  igual(d.log, ['copiar file:///cache/achicada.jpg', 'crear file:///docs/fotos-comida/c9.jpg'], 'orden');
+  igual([...d.archivos], ['file:///docs/fotos-comida/c9.jpg'], 'queda el archivo');
+});
+
+await prueba('foto: si la transaccion falla, se borra el archivo copiado y tira', async () => {
+  const d = dobles({ crearFalla: true });
+  await lanza(() => G.guardarComidaConFoto('c9', 'file:///cache/a.jpg', d.deps), 'transaccion');
+  igual(d.log.at(-1), 'borrar file:///docs/fotos-comida/c9.jpg', 'limpia');
+  igual(d.archivos.size, 0, 'no queda archivo huerfano');
+});
+
+await prueba('foto: si la copia falla, la comida se guarda igual sin foto', async () => {
+  const d = dobles({ copiaFalla: true });
+  const url = await callarWarn(() => G.guardarComidaConFoto('c9', 'file:///cache/a.jpg', d.deps));
+  igual(url, null, 'sin foto');
+  igual(d.log, ['copiar file:///cache/a.jpg', 'crear null'], 'se crea igual');
+});
+
+await prueba('foto: sin foto no se copia nada', async () => {
+  const d = dobles();
+  igual(await G.guardarComidaConFoto('c9', null, d.deps), null, 'sin foto');
+  igual(d.log, ['crear null'], 'solo crear');
+});
+
+await prueba('cancelar no es un error para mostrar, pero tiene su texto', () => {
+  igual(R.errorDeCodigo('CANCELADO'), 'fallo', 'el servidor no lo manda');
+  cierto(typeof R.MENSAJE_ERROR_FOTO.cancelado === 'string', 'texto');
 });
 
 // --- resultado -------------------------------------------------------------

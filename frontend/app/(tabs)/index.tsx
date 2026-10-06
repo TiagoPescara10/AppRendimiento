@@ -20,6 +20,8 @@ import type { ResultadoNutricional } from '@/lib/nutricion';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import { ultimoPeso } from '@/db/queries/peso';
 import { listarComidasPorFecha, listarItemsConAlimento } from '@/db/queries/comidas';
+import { fotoDisponible } from '@/features/foto/archivo';
+import { MiniaturaComida } from '@/features/foto/components/FotoComida';
 import { totalDelDia, registrarAgua, eliminarUltimoRegistro } from '@/db/queries/agua';
 import { CartelPendientes } from '@/features/agenda/components/CartelPendientes';
 import { SheetModoEntrenamiento } from '@/features/entrenamiento/components/SheetModoEntrenamiento';
@@ -48,6 +50,8 @@ type ComidaResumen = {
   kcal: number;
   /** Los primeros nombres nomas: la fila es un resumen, no la lista completa. */
   alimentos: string[];
+  /** La foto guardada, si la hay y el archivo sigue estando. */
+  foto: string | null;
 };
 
 /**
@@ -208,6 +212,7 @@ export default function Dashboard() {
             // con tres nombres ya se entiende que comio. Sin puntos
             // suspensivos, que no agregan nada.
             alimentos: items.slice(0, MAX_ALIMENTOS).map((it) => it.alimento_nombre),
+            foto: fotoDisponible(comida.foto_url),
           })),
         });
       })().catch((e) => console.error('Error al cargar el dashboard:', e));
@@ -366,6 +371,8 @@ export default function Dashboard() {
               ]}
               onPress={() => router.push(`/comida/${c.id}`)}
             >
+              {/* Solo las que tienen foto: las demas quedan como siempre. */}
+              {c.foto && <MiniaturaComida uri={c.foto} />}
               <View style={estilos.flex}>
                 <Text style={estilos.comidaTipo}>{capitalizar(c.tipo)}</Text>
                 {c.alimentos.length > 0 && (

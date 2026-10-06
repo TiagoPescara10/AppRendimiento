@@ -8,7 +8,8 @@
 //   2. Empareja lo que vio el modelo con el catalogo local
 //      (features/foto/emparejar.ts): de ahi salen las kcal y los macros.
 //   3. Muestra la lista para confirmar. Nada se escribe hasta tocar
-//      "Agregar a ...", y ahi va todo en una sola transaccion.
+//      "Agregar a ...", y ahi va todo en una sola transaccion. La foto
+//      achicada se guarda SOLO en el celular (features/foto/archivo.ts).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -18,7 +19,7 @@ import {
   StyleSheet,
   Alert,
   Modal,
-  ActivityIndicator,
+  Image,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -43,6 +44,9 @@ import { randomUUID } from '@/db/sync/uuid';
 import { aISOLocal } from '@/lib/fechas';
 
 import { analizarFoto, prepararFoto } from '@/features/foto/api';
+import { borrarFotoComida, guardarFotoComida } from '@/features/foto/archivo';
+import { guardarComidaConFoto } from '@/features/foto/guardar';
+import { AnalizandoFoto } from '@/features/foto/components/AnalizandoFoto';
 import { aplicarAlimento, emparejar } from '@/features/foto/emparejar';
 import type { ItemEmparejado } from '@/features/foto/emparejar';
 import { MENSAJE_ERROR_FOTO } from '@/features/foto/respuesta';
@@ -95,16 +99,26 @@ export default function FotoComida() {
   const [sheet, setSheet] = useState<string | null>(null);
   const [cambiando, setCambiando] = useState<string | null>(null);
 
+  // La foto achicada (la que se mando) es la que se guarda con la comida.
+  const [fotoAchicada, setFotoAchicada] = useState<string | null>(null);
+  const cancelar = useRef<AbortController | null>(null);
+
   const analizar = useCallback(async (vivo: () => boolean) => {
     setFase({ tipo: 'analizando' });
+    cancelar.current?.abort();
+    const control = new AbortController();
+    cancelar.current = control;
     try {
       if (!params.uri) {
         setFase({ tipo: 'error', error: 'fallo' });
         return;
       }
-      const base64 = await prepararFoto(params.uri, Number(params.ancho) || 0, Number(params.alto) || 0);
-      const r = await analizarFoto(base64);
-      if (!vivo()) return;
+      const foto = await prepararFoto(params.uri, Number(params.ancho) || 0, Number(params.alto) || 0);
+      if (!vivo() || control.signal.aborted) return;
+      setFotoAchicada(foto.uri);
+      const r = await analizarFoto(foto.base64, control.signal);
+      // Cancelado: la pantalla ya se fue con router.back().
+      if (!vivo() || control.signal.aborted) return;
       if (!r.ok) {
         setFase({ tipo: 'error', error: r.error });
         return;
@@ -133,8 +147,17 @@ export default function FotoComida() {
   useEffect(() => {
     let vivo = true;
     analizar(() => vivo);
-    return () => { vivo = false; };
+    return () => {
+      vivo = false;
+      cancelar.current?.abort();
+    };
   }, [analizar]);
+
+  // Corta el pedido y vuelve. Sobre el cupo: ver features/foto/api.ts.
+  const cancelarAnalisis = () => {
+    cancelar.current?.abort();
+    router.back();
+  };
 
   const cargarAMano = () => {
     router.replace({ pathname: '/comida/nueva', params: { tipo } });
@@ -197,16 +220,31 @@ export default function FotoComida() {
         Alert.alert('Error', 'No se encontró el perfil.');
         return;
       }
-      await crearComidaConItems(
-        { id: randomUUID(), usuario_id: perfil.id, tipo, fecha_hora: aISOLocal(new Date()) },
-        filas.map((f) => ({
-          id: randomUUID(),
-          alimento_id: f.alimento!.id,
-          cantidad_g: f.cantidad_g,
-          editado_por_usuario: f.editada,
-          carga: f.carga,
-        })),
-      );
+      const comidaId = randomUUID();
+      const items = filas.map((f) => ({
+        id: randomUUID(),
+        alimento_id: f.alimento!.id,
+        cantidad_g: f.cantidad_g,
+        editado_por_usuario: f.editada,
+        carga: f.carga,
+      }));
+      // Copiar la foto primero; si la transaccion falla, se borra.
+      await guardarComidaConFoto(comidaId, fotoAchicada, {
+        copiar: guardarFotoComida,
+        borrar: borrarFotoComida,
+        crear: async (fotoUrl) => {
+          await crearComidaConItems(
+            {
+              id: comidaId,
+              usuario_id: perfil.id,
+              tipo,
+              fecha_hora: aISOLocal(new Date()),
+              foto_url: fotoUrl,
+            },
+            items,
+          );
+        },
+      });
       router.back();
     } catch (e) {
       console.error('Error al guardar la comida de la foto:', e);
@@ -244,12 +282,8 @@ export default function FotoComida() {
         <Text style={estilos.titulo}>Comida con foto</Text>
       </View>
 
-      {fase.tipo === 'analizando' && (
-        <View style={estilos.centro}>
-          <ActivityIndicator color={colors.action} size="large" />
-          <Text style={estilos.nombre}>Analizando la foto…</Text>
-          <Text style={estilos.detalle}>Puede tardar unos segundos.</Text>
-        </View>
+      {fase.tipo === 'analizando' && params.uri && (
+        <AnalizandoFoto uri={params.uri} onCancelar={cancelarAnalisis} />
       )}
 
       {fase.tipo === 'error' && (
@@ -278,6 +312,16 @@ export default function FotoComida() {
 
       {fase.tipo === 'confirmar' && (
         <>
+          {/* Mas chica que mientras se analiza: alcanza para comparar lo que
+              se ve con lo que se detecto. */}
+          {(fotoAchicada ?? params.uri) && (
+            <Image
+              source={{ uri: (fotoAchicada ?? params.uri)! }}
+              style={estilos.fotoConfirmar}
+              resizeMode="cover"
+              accessibilityLabel="La foto de la comida"
+            />
+          )}
           <View style={estilos.lista}>
             {filas.map((f) => (
               <View key={f.clave} style={estilos.item}>
@@ -481,6 +525,12 @@ const estilos = StyleSheet.create({
   },
 
   centro: { paddingVertical: spacing.xxl, alignItems: 'center', gap: spacing.sm },
+  fotoConfirmar: {
+    width: '100%',
+    height: 140,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceAlt,
+  },
   textoCentrado: { textAlign: 'center' },
   botones: { alignSelf: 'stretch', gap: spacing.sm, marginTop: spacing.md },
 

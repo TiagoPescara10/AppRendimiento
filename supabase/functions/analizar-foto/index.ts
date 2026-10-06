@@ -162,7 +162,11 @@ function validar(crudo: unknown): Item[] | null {
   return salida;
 }
 
-async function analizar(imagen: string, tipo: 'image/jpeg' | 'image/png' | 'image/webp'): Promise<Item[] | null> {
+async function analizar(
+  imagen: string,
+  tipo: 'image/jpeg' | 'image/png' | 'image/webp',
+  signal: AbortSignal,
+): Promise<Item[] | null> {
   const cliente = new Anthropic({
     apiKey: Deno.env.get('ANTHROPIC_API_KEY'),
     timeout: TIMEOUT_MODELO_MS,
@@ -184,7 +188,7 @@ async function analizar(imagen: string, tipo: 'image/jpeg' | 'image/png' | 'imag
         ],
       },
     ],
-  } as Anthropic.MessageCreateParamsNonStreaming);
+  } as Anthropic.MessageCreateParamsNonStreaming, { signal });
 
   // Con refusal o max_tokens la salida puede no cumplir el schema.
   if (respuesta.stop_reason !== 'end_turn') {
@@ -276,10 +280,28 @@ Deno.serve(async (req) => {
     if (e) console.error('analizar-foto: devolver_foto fallo', e);
   };
 
+  // Cancelar desde la app. Medido el 2026-10-06 con una funcion de prueba:
+  // el Edge Runtime de Supabase NO propaga el corte del cliente a
+  // req.signal; el handler sigue hasta el final. En la practica:
+  //   - si la app cancela durante la subida, la funcion no llega a leer el
+  //     cuerpo y no se descuenta nada;
+  //   - si cancela despues, el analisis termina igual y la foto cuenta.
+  // Los dos chequeos de req.signal quedan por si el runtime empieza a
+  // propagarlo: antes del modelo devuelve el cupo; durante, corta el pedido
+  // para no pagar la salida, y la foto cuenta igual.
+  if (req.signal.aborted) {
+    await devolver();
+    return error('ANALISIS_FALLIDO', 'Cancelado.', 499);
+  }
+
   let items: Item[] | null;
   try {
-    items = await analizar(b64, tipo);
+    items = await analizar(b64, tipo, req.signal);
   } catch (e) {
+    if (req.signal.aborted) {
+      console.log('analizar-foto: el cliente cancelo durante el analisis');
+      return error('ANALISIS_FALLIDO', 'Cancelado.', 499);
+    }
     // Solo el mensaje: el error del SDK no trae la imagen, pero por las dudas
     // no se loguea el objeto entero.
     console.error('analizar-foto: error del modelo', e instanceof Error ? e.message : String(e));

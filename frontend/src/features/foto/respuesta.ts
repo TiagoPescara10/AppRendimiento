@@ -35,6 +35,7 @@ export type ErrorFoto =
   | 'limite_global'
   | 'imagen_grande'
   | 'no_configurado'
+  | 'cancelado'
   | 'fallo';
 
 /** null si no cumple el contrato. */
@@ -83,5 +84,7 @@ export const MENSAJE_ERROR_FOTO: Record<ErrorFoto, string> = {
   limite_global: 'Las fotos están en pausa por hoy. Podés cargarlo a mano.',
   imagen_grande: 'La foto es demasiado pesada. Probá con otra.',
   no_configurado: 'Registrar con foto no está disponible en esta versión.',
+  // No se muestra: cancelar vuelve atras. Esta por si algun dia se muestra.
+  cancelado: 'Cancelaste el análisis.',
   fallo: 'No pudimos analizar la foto. Probá de nuevo o cargalo a mano.',
 };

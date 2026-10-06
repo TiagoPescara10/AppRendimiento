@@ -208,6 +208,11 @@ export const colors = {
   textoSobreFoto: palette.white,
   textoSobreFotoSuave: 'rgba(255, 255, 255, 0.75)',
   separadorSobreFoto: 'rgba(255, 255, 255, 0.30)',
+
+  // la foto de una comida a pantalla completa: negro, como cualquier visor de
+  // fotos, para que la imagen sea lo unico que se ve. La X va en
+  // textoSobreFoto.
+  fondoFotoCompleta: palette.black,
   // los chevrons de fondo de la tarjeta sin foto. Solo decorativos.
   marcaAguaNivel: 'rgba(255, 255, 255, 0.08)',
 
