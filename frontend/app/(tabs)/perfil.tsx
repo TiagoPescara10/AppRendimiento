@@ -22,6 +22,7 @@ import { listarPesos, ultimoPeso } from '@/db/queries/peso';
 import { minutosEntrenamientoDelDia } from '@/db/queries/eventos';
 import { cerrarSesion } from '@/features/auth/session';
 import { MODO_BETA } from '@/config/beta';
+import Constants from 'expo-constants';
 import { SheetRegistroPeso } from '@/features/perfil/components/SheetRegistroPeso';
 import { SheetMetaAgua } from '@/features/perfil/components/SheetMetaAgua';
 import { sembrarDatosDesarrollo } from '@/db/seeds/devSeed';
@@ -35,6 +36,9 @@ import type { PerfilRow, RegistroPesoRow } from '@/db/schema';
 // ---------------------------------------------------------------------------
 // Constantes y helpers
 // ---------------------------------------------------------------------------
+
+/** Sale de app.json ("version") y no se escribe a mano en ningun lado. */
+const VERSION_APP = Constants.expoConfig?.version ?? '';
 
 const ETIQUETA_ACTIVIDAD: Record<string, string> = {
   sedentario: 'Sedentario',
@@ -480,6 +484,17 @@ export default function Perfil() {
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </Pressable>
 
+        <View style={estilos.separador} />
+
+        {/* Privacidad */}
+        <Pressable style={estilos.opcionFila} onPress={() => router.push('/perfil/privacidad')}>
+          <View style={estilos.opcionIzquierda}>
+            <Ionicons name="lock-closed-outline" size={sizes.iconSmall} color={colors.textSecondary} />
+            <Text style={estilos.opcionTexto}>Privacidad</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </Pressable>
+
         {/* Cada fila opcional trae su separador ARRIBA: asi, si se oculta, no
             queda una linea suelta al pie de la card. */}
         {__DEV__ && (
@@ -518,7 +533,9 @@ export default function Perfil() {
       </View>
 
       {/* Version al pie */}
-      <Text style={estilos.versionTexto}>Versión 1.0.0</Text>
+      <Text style={estilos.versionTexto}>
+        {MODO_BETA ? `Beta ${VERSION_APP}` : `Versión ${VERSION_APP}`}
+      </Text>
 
       {/* Sheet para registrar peso */}
       <SheetRegistroPeso
@@ -715,7 +732,7 @@ const estilos = StyleSheet.create({
   versionTexto: {
     fontSize: fontSize.caption,
     lineHeight: lineHeight.caption,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     textAlign: 'center',
     marginVertical: spacing.sm,
   },
