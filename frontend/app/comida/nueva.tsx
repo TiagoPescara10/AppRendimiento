@@ -2,10 +2,11 @@
 // la hora), buscas alimentos, y por cada uno elegis cuanto comiste. Nada se
 // escribe en la base hasta que tocas "Guardar comida".
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, StyleSheet, Alert, Modal, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
+import type * as ImagePicker from 'expo-image-picker';
+import { elegirFotoDeGaleria, sacarFotoConCamara } from '@/features/permisos/asegurarPermiso';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Input } from '@/ui/Input';
@@ -76,6 +77,7 @@ export default function NuevaComida() {
   const [resultados, setResultados] = useState<Alimento[]>([]);
   const [items, setItems] = useState<ItemPendiente[]>([]);
   const [guardando, setGuardando] = useState(false);
+  const buscador = useRef<TextInput>(null);
 
   // Modal para dar de alta alimento manual si no esta en catalogo
   const [modalAltaManual, setModalAltaManual] = useState(false);
@@ -200,20 +202,19 @@ export default function NuevaComida() {
     });
   };
 
+  // Sin permiso no se queda trabado: con "Ahora no" queda el buscador
+  // enfocado para cargar a mano. Si se fue a Ajustes, al volver toca de nuevo.
   const sacarFoto = async () => {
-    const permiso = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permiso.granted) {
-      Alert.alert('Sin acceso a la cámara', 'Podés habilitarlo desde los ajustes del teléfono.');
-      return;
-    }
-    const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.9 });
-    if (!r.canceled && r.assets[0]) abrirFoto(r.assets[0]);
+    const { asset, permiso } = await sacarFotoConCamara({ mediaTypes: ['images'], quality: 0.9 });
+    if (asset) abrirFoto(asset);
+    else if (permiso === 'rechazado') buscador.current?.focus();
   };
 
-  // El selector de galeria del sistema no necesita permiso de lectura.
+  // El selector de galeria del sistema no necesita permiso de lectura; solo
+  // si falla por permiso se pide el de fotos (features/permisos).
   const elegirDeGaleria = async () => {
-    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9 });
-    if (!r.canceled && r.assets[0]) abrirFoto(r.assets[0]);
+    const asset = await elegirFotoDeGaleria({ mediaTypes: ['images'], quality: 0.9 });
+    if (asset) abrirFoto(asset);
   };
 
   const elegirFoto = () => {
@@ -316,6 +317,7 @@ export default function NuevaComida() {
       <View style={estilos.buscadorFila}>
         <View style={estilos.flex}>
           <Input
+            ref={buscador}
             value={busqueda}
             onChangeText={setBusqueda}
             placeholder="Buscar alimento"

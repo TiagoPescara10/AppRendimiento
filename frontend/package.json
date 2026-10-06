@@ -64,6 +64,7 @@
     "test:gps": "node scripts/probar-gps.mjs",
     "test:avisos": "node scripts/probar-avisos.mjs",
     "test:foto": "node scripts/probar-foto.mjs",
+    "test:permisos": "node scripts/probar-permisos.mjs",
     "test:fuerza": "node scripts/probar-fuerza.mjs",
     "test:validacion": "node scripts/probar-validacion.mjs",
     "test:seed": "node scripts/probar-seed-desarrollo.mjs",

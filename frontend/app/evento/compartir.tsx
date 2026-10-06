@@ -35,7 +35,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
+import { elegirFotoDeGaleria, sacarFotoConCamara } from '@/features/permisos/asegurarPermiso';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import { captureRef } from 'react-native-view-shot';
@@ -168,20 +168,17 @@ export default function Compartir() {
     }
   };
 
+  // Sin permiso, la tarjeta sigue sin foto de fondo: no hace falta ofrecer
+  // otra cosa. El dialogo de Ajustes lo maneja features/permisos.
   const sacarFoto = async () => {
-    const permiso = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permiso.granted) {
-      Alert.alert('Sin acceso a la cámara', 'Podés habilitarlo desde los ajustes del teléfono.');
-      return;
-    }
-    const r = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.9 });
-    if (!r.canceled && r.assets[0]) await usarFoto(r.assets[0].uri);
+    const { asset } = await sacarFotoConCamara({ mediaTypes: ['images'], quality: 0.9 });
+    if (asset) await usarFoto(asset.uri);
   };
 
   // El selector de galeria del sistema no necesita permiso de lectura.
   const elegirDeGaleria = async () => {
-    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9 });
-    if (!r.canceled && r.assets[0]) await usarFoto(r.assets[0].uri);
+    const asset = await elegirFotoDeGaleria({ mediaTypes: ['images'], quality: 0.9 });
+    if (asset) await usarFoto(asset.uri);
   };
 
   const quitarFoto = async () => {
