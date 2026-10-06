@@ -1,6 +1,10 @@
 // La pasarela: ultimo paso del muro. Reemplaza al registro obligatorio que
 // habia antes.
 //
+// En beta (src/config/beta.ts) no se llega aca por ninguna navegacion: la
+// ultima pagina de beneficios entra directo. Si alguien llega igual (un link,
+// un historial viejo), redirige a la app. No se borra: vuelve con el flag.
+//
 // ============================================================================
 // TODO — ACA VA LA COMPRA DE VERDAD. HOY NO SE COBRA NADA.
 //
@@ -22,13 +26,14 @@
 
 import { useState, useRef } from 'react';
 import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
 import { Input } from '@/ui/Input';
 import { guardarSesion } from '@/features/auth/session';
+import { MODO_BETA } from '@/config/beta';
 import { colors, spacing, radius, fontSize, lineHeight, fontWeight, shadow, sizes } from '@/ui/theme';
 
 // ---------------------------------------------------------------------------
@@ -68,7 +73,14 @@ const BENEFICIOS = [
 
 // ---------------------------------------------------------------------------
 
-export default function Planes() {
+// Envoltorio y no un return temprano adentro de Planes: el return iria antes
+// de los hooks.
+export default function PantallaPlanes() {
+  if (MODO_BETA) return <Redirect href="/(tabs)" />;
+  return <Planes />;
+}
+
+function Planes() {
   const router = useRouter();
   const [plan, setPlan] = useState<ClavePlan>('anual');
   const [email, setEmail] = useState('');

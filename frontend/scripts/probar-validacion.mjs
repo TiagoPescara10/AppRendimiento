@@ -41,6 +41,7 @@ writeFileSync(
       join(RAIZ, 'src/lib/nutricion.ts'),
       join(RAIZ, 'src/db/schema.ts'),
       join(RAIZ, 'src/db/queries/comidas.ts'),
+      join(RAIZ, 'src/lib/destino.ts'),
     ],
   }),
 );
@@ -65,6 +66,7 @@ const {
   IMC_MINIMO_SALUDABLE,
 } = req('./lib/salud.js');
 const { calcularTodo } = req('./lib/nutricion.js');
+const { calcularDestino, perfilCompleto } = req('./lib/destino.js');
 
 let pruebasPasadas = 0;
 
@@ -374,6 +376,64 @@ prueba('modo objetivo: pasa con todos los campos requeridos', () => {
     modoNutricion: 'objetivo',
   });
   assert.equal(res.ok, true);
+});
+
+// ---------------------------------------------------------------------------
+// Guard de app/_layout.tsx (src/lib/destino.ts)
+// ---------------------------------------------------------------------------
+
+const PERFIL_OBJETIVO = {
+  modo_nutricion: 'objetivo',
+  nombre: 'Tiago',
+  altura_cm: 178,
+  fecha_nacimiento: '1998-05-15',
+  sexo_biologico: 'masculino',
+  nivel_actividad: 'moderado',
+  objetivo: 'mantener',
+};
+
+const PERFIL_RECUENTO = {
+  modo_nutricion: 'recuento',
+  nombre: 'Tiago',
+  altura_cm: 178,
+  fecha_nacimiento: null,
+  sexo_biologico: null,
+  nivel_actividad: null,
+  objetivo: null,
+};
+
+prueba('destino: sin perfil va al onboarding, haya sesion o no', () => {
+  assert.equal(calcularDestino(null, null), 'onboarding');
+  assert.equal(calcularDestino(null, { email: 'a@b.com' }), 'onboarding');
+});
+
+prueba('destino: perfil incompleto va al onboarding aunque tenga sesion', () => {
+  const sinObjetivo = { ...PERFIL_OBJETIVO, objetivo: null };
+  assert.equal(perfilCompleto(sinObjetivo), false);
+  assert.equal(calcularDestino(sinObjetivo, { email: 'a@b.com' }), 'onboarding');
+  const recuentoSinAltura = { ...PERFIL_RECUENTO, altura_cm: null };
+  assert.equal(calcularDestino(recuentoSinAltura, null), 'onboarding');
+});
+
+prueba('destino: perfil completo sin sesion va al muro (resumen, beneficios, Empezar)', () => {
+  assert.equal(calcularDestino(PERFIL_OBJETIVO, null), 'muro');
+  assert.equal(calcularDestino(PERFIL_RECUENTO, null), 'muro');
+});
+
+prueba('destino: perfil completo con sesion entra a la app', () => {
+  assert.equal(calcularDestino(PERFIL_OBJETIVO, { email: 'a@b.com' }), 'app');
+});
+
+prueba('destino: recuento con nombre y altura cuenta como completo', () => {
+  assert.equal(perfilCompleto(PERFIL_RECUENTO), true);
+  assert.equal(calcularDestino(PERFIL_RECUENTO, { email: 'a@b.com' }), 'app');
+});
+
+prueba('destino: la sesion de la beta (email vacio) entra a la app', () => {
+  // En beta, "Empezar" guarda { email: '' }. Un '' no puede leerse como
+  // "sin sesion": el perfil completo tiene que entrar siempre.
+  assert.equal(calcularDestino(PERFIL_OBJETIVO, { email: '' }), 'app');
+  assert.equal(calcularDestino(PERFIL_RECUENTO, { email: '' }), 'app');
 });
 
 console.log(`\n${pruebasPasadas} pasan, 0 fallan\n`);

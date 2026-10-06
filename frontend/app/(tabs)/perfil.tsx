@@ -21,6 +21,7 @@ import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import { listarPesos, ultimoPeso } from '@/db/queries/peso';
 import { minutosEntrenamientoDelDia } from '@/db/queries/eventos';
 import { cerrarSesion } from '@/features/auth/session';
+import { MODO_BETA } from '@/config/beta';
 import { SheetRegistroPeso } from '@/features/perfil/components/SheetRegistroPeso';
 import { SheetMetaAgua } from '@/features/perfil/components/SheetMetaAgua';
 import { sembrarDatosDesarrollo } from '@/db/seeds/devSeed';
@@ -451,22 +452,25 @@ export default function Perfil() {
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </Pressable>
 
-        <View style={estilos.separador} />
-
-        {/* Suscripcion */}
-        <Pressable style={estilos.opcionFila}>
-          <View style={estilos.opcionIzquierda}>
-            <Ionicons name="card-outline" size={sizes.iconSmall} color={colors.textSecondary} />
-            <Text style={estilos.opcionTexto}>Suscripción</Text>
-          </View>
-          <View style={estilos.opcionDerecha}>
-            <Text style={estilos.opcionValor}>Anual</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </View>
-        </Pressable>
+        {/* Suscripcion. Oculta en beta: no hay pago (src/config/beta.ts). */}
+        {!MODO_BETA && (
+          <>
+            <View style={estilos.separador} />
+            <Pressable style={estilos.opcionFila}>
+              <View style={estilos.opcionIzquierda}>
+                <Ionicons name="card-outline" size={sizes.iconSmall} color={colors.textSecondary} />
+                <Text style={estilos.opcionTexto}>Suscripción</Text>
+              </View>
+              <View style={estilos.opcionDerecha}>
+                <Text style={estilos.opcionValor}>Anual</Text>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </View>
+            </Pressable>
+          </>
+        )}
       </View>
 
-      {/* Bloque e: Ayuda y cerrar sesion */}
+      {/* Bloque e: Ayuda y cerrar sesion (este ultimo, fuera de la beta) */}
       <View style={estilos.card}>
         <Pressable style={estilos.opcionFila}>
           <View style={estilos.opcionIzquierda}>
@@ -476,10 +480,11 @@ export default function Perfil() {
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </Pressable>
 
-        <View style={estilos.separador} />
-
+        {/* Cada fila opcional trae su separador ARRIBA: asi, si se oculta, no
+            queda una linea suelta al pie de la card. */}
         {__DEV__ && (
           <>
+            <View style={estilos.separador} />
             <Pressable
               style={estilos.opcionFila}
               onPress={ejecutarSeed}
@@ -492,18 +497,24 @@ export default function Perfil() {
                 </Text>
               </View>
             </Pressable>
-            <View style={estilos.separador} />
           </>
         )}
 
-        <Pressable style={estilos.opcionFila} onPress={confirmarCerrarSesion}>
-          <View style={estilos.opcionIzquierda}>
-            <Ionicons name="log-out-outline" size={sizes.iconSmall} color={colors.danger} />
-            <Text style={[estilos.opcionTexto, estilos.textoCerrarSesion]}>
-              Cerrar sesión
-            </Text>
-          </View>
-        </Pressable>
+        {/* Oculto en beta: lleva a un login de mentira que acepta cualquier
+            cosa (src/config/beta.ts). */}
+        {!MODO_BETA && (
+          <>
+            <View style={estilos.separador} />
+            <Pressable style={estilos.opcionFila} onPress={confirmarCerrarSesion}>
+              <View style={estilos.opcionIzquierda}>
+                <Ionicons name="log-out-outline" size={sizes.iconSmall} color={colors.danger} />
+                <Text style={[estilos.opcionTexto, estilos.textoCerrarSesion]}>
+                  Cerrar sesión
+                </Text>
+              </View>
+            </Pressable>
+          </>
+        )}
       </View>
 
       {/* Version al pie */}

@@ -10,7 +10,7 @@
 // meter react-native-pager-view.
 
 import { useRef, useState, useCallback } from 'react';
-import { View, FlatList, StyleSheet, useWindowDimensions } from 'react-native';
+import { View, FlatList, StyleSheet, Alert, useWindowDimensions } from 'react-native';
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -18,6 +18,8 @@ import { Pantalla } from '@/ui/Pantalla';
 import { Progreso } from '@/ui/Progreso';
 import { Boton } from '@/ui/Boton';
 import { spacing } from '@/ui/theme';
+import { MODO_BETA } from '@/config/beta';
+import { guardarSesion } from '@/features/auth/session';
 
 import { PantallaBeneficio } from '@/features/onboarding/components/PantallaBeneficio';
 import { PreviewComidas } from '@/features/onboarding/components/PreviewComidas';
@@ -73,6 +75,8 @@ export default function Beneficios() {
   const { width: ancho } = useWindowDimensions();
   const lista = useRef<FlatList<Beneficio>>(null);
   const [indice, setIndice] = useState(0);
+  const [entrando, setEntrando] = useState(false);
+  const entrandoRef = useRef(false);
 
   const ultima = indice === PANTALLAS.length - 1;
 
@@ -90,11 +94,34 @@ export default function Beneficios() {
   // pager. Recien ahi navega.
   const avanzar = () => {
     if (ultima) {
-      router.push('/onboarding/planes');
+      if (MODO_BETA) entrarBeta();
+      else router.push('/onboarding/planes');
       return;
     }
     lista.current?.scrollToIndex({ index: indice + 1, animated: true });
   };
+
+  // Beta: sin planes ni pago. Hace lo mismo que planes.tsx al "comprar":
+  // guarda la sesion para que el guard deje pasar y entra a la app. Sin
+  // email: en beta no se pide, y nadie lee el email de la sesion (el guard
+  // solo mira que haya una; ver src/lib/destino.ts).
+  const entrarBeta = async () => {
+    if (entrandoRef.current) return;
+    entrandoRef.current = true;
+    setEntrando(true);
+    try {
+      await guardarSesion({ email: '' });
+      router.replace('/(tabs)');
+    } catch (error) {
+      console.error('Error al entrar a la app:', error);
+      Alert.alert('Error', 'No se pudo entrar. Intentá de nuevo.');
+    } finally {
+      entrandoRef.current = false;
+      setEntrando(false);
+    }
+  };
+
+  const textoUltima = MODO_BETA ? 'Empezar' : 'Ver planes';
 
   return (
     // scroll false porque el scroll de esta pantalla es horizontal y lo maneja
@@ -127,7 +154,11 @@ export default function Beneficios() {
       />
 
       <View style={estilos.zona}>
-        <Boton titulo={ultima ? 'Ver planes' : 'Siguiente'} onPress={avanzar} />
+        <Boton
+          titulo={ultima ? textoUltima : 'Siguiente'}
+          onPress={avanzar}
+          cargando={ultima && entrando}
+        />
       </View>
     </Pantalla>
   );

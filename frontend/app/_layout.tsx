@@ -7,6 +7,7 @@ import { initDb } from '@/db/schema';
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import { obtenerSesion } from '@/features/auth/session';
 import { colors } from '@/ui/theme';
+import { calcularDestino, type Destino } from '@/lib/destino';
 import { iniciarAvisos, sincronizarAvisos } from '@/features/avisos/sincronizar';
 import { configurarHandlerAvisos, crearCanalAvisos } from '@/features/avisos/configurar';
 import { PREFIJO_AVISO } from '@/features/avisos/planificar';
@@ -14,7 +15,6 @@ import { PREFIJO_AVISO } from '@/features/avisos/planificar';
 SplashScreen.preventAutoHideAsync();
 configurarHandlerAvisos();
 
-type Destino = 'onboarding' | 'muro' | 'app';
 
 // Rutas donde el usuario puede estar legitimamente en cada estado.
 // El guard solo redirige si esta FUERA de estas.
@@ -39,21 +39,8 @@ export default function RootLayout() {
   const calcular = useCallback(async () => {
     const perfil = await obtenerPerfilLocal();
     const sesion = await obtenerSesion();
-
-    // El onboarding esta completo cuando estan los campos que necesita
-    // el calculo segun el modo de nutricion elegido.
-    const perfilCompleto =
-      perfil?.modo_nutricion === 'recuento'
-        ? !!perfil?.nombre && !!perfil?.altura_cm
-        : !!perfil?.altura_cm &&
-          !!perfil?.fecha_nacimiento &&
-          !!perfil?.sexo_biologico &&
-          !!perfil?.nivel_actividad &&
-          !!perfil?.objetivo;
-
-    if (!perfilCompleto) return 'onboarding' as const;
-    if (!sesion) return 'muro' as const;
-    return 'app' as const;
+    // La regla vive en src/lib/destino.ts, que tiene pruebas.
+    return calcularDestino(perfil, sesion);
   }, []);
 
   // Arranque: abrir la base antes de nada.
