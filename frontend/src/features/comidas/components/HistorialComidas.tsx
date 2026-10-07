@@ -49,12 +49,15 @@ export function HistorialComidas({
   usuarioId,
   onAviso,
   accionesExtra,
+  version = 0,
 }: {
   usuarioId: string;
   /** Para el toast de la pantalla ("Agregado a hoy"). */
   onAviso: (mensaje: string) => void;
   /** Acciones del "⋯" ademas de Repetir, por comida. */
   accionesExtra?: (comida: ComidaHistorial) => Accion[];
+  /** Cambiarla recarga la lista (despues de guardar algo desde la pantalla). */
+  version?: number;
 }) {
   const router = useRouter();
   const hoy = aFechaLocal(new Date());
@@ -71,7 +74,9 @@ export function HistorialComidas({
     ]);
     setDias(d);
     setComidas(c);
-  }, [usuarioId, rango]);
+    // version no se lee: esta para que cambiarla vuelva a cargar
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usuarioId, rango, version]);
 
   // Al volver del detalle (pudo borrar o editar) se recarga
   useFocusEffect(

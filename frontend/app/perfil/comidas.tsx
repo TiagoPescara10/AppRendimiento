@@ -31,6 +31,8 @@ export default function MisComidas() {
   const [pestana, setPestana] = useState<Pestana>('historial');
   // Comida del historial que se esta guardando como receta
   const [aReceta, setAReceta] = useState<ComidaHistorial | null>(null);
+  // Sube al guardar una receta: el historial recarga y el menu ya no la ofrece
+  const [version, setVersion] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
@@ -49,6 +51,7 @@ export default function MisComidas() {
     try {
       await guardarComidaComoReceta({ comidaId: comida.id, usuarioId, nombre });
       avisar('Receta guardada');
+      setVersion((v) => v + 1);
     } catch (e) {
       console.error('Error al guardar la receta:', e);
       avisar('No se pudo guardar');
@@ -95,9 +98,13 @@ export default function MisComidas() {
             <HistorialComidas
               usuarioId={usuarioId}
               onAviso={avisar}
-              accionesExtra={(c) => [
-                { texto: 'Guardar como receta', icono: 'bookmark-outline', onPress: () => setAReceta(c) },
-              ]}
+              version={version}
+              accionesExtra={(c) =>
+                // Ya guardada: no se ofrece de nuevo
+                c.receta_guardada_id
+                  ? []
+                  : [{ texto: 'Guardar como receta', icono: 'bookmark-outline', onPress: () => setAReceta(c) }]
+              }
             />
           ) : (
             <RecetasGuardadas usuarioId={usuarioId} onAviso={avisar} />

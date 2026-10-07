@@ -142,6 +142,8 @@ export interface ComidaRow {
   tipo: TipoComida;
   foto_url: string | null;
   notas: string | null;
+  /** La receta que se creo desde esta comida. null si no se guardo (o se borro). */
+  receta_guardada_id: string | null;
   created_at: string;
   updated_at: string;
 }

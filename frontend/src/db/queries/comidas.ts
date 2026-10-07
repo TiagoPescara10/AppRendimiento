@@ -467,6 +467,8 @@ export interface ComidaHistorial {
   fecha_hora: string;
   tipo: TipoComida;
   foto_url: string | null;
+  /** Si ya se guardo como receta: el menu no la ofrece de nuevo. */
+  receta_guardada_id: string | null;
   kcal: number;
 }
 
@@ -477,7 +479,7 @@ export async function comidasPorRango(
   hasta: string,
 ): Promise<ComidaHistorial[]> {
   return getDb().getAllAsync<ComidaHistorial>(
-    `SELECT c.id, c.fecha, c.fecha_hora, c.tipo, c.foto_url,
+    `SELECT c.id, c.fecha, c.fecha_hora, c.tipo, c.foto_url, c.receta_guardada_id,
             COALESCE(SUM(i.cantidad_g * a.kcal_por_100g / 100.0), 0) AS kcal
      FROM comida c
      LEFT JOIN item_comida i ON i.comida_id = c.id

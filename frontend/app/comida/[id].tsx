@@ -127,8 +127,6 @@ export default function DetalleComida() {
   // Grupos de receta abiertos, por receta_grupo
   const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
   const [guardandoReceta, setGuardandoReceta] = useState(false);
-  // Una vez guardada, el boton queda en "Receta guardada": no se ofrece de nuevo
-  const [recetaGuardada, setRecetaGuardada] = useState(false);
 
   /**
    * Recarga todo desde la base.
@@ -226,7 +224,9 @@ export default function DetalleComida() {
     setGuardandoReceta(false);
     try {
       await guardarComidaComoReceta({ comidaId: comida.id, usuarioId: comida.usuario_id, nombre });
-      setRecetaGuardada(true);
+      // La comida ahora apunta a la receta: al recargar, el boton queda en
+      // "Receta guardada", tambien la proxima vez que se entre
+      await cargar();
     } catch (e) {
       console.error('Error al guardar la receta:', e);
       Alert.alert('Error', 'No se pudo guardar la receta.');
@@ -374,7 +374,7 @@ export default function DetalleComida() {
       )}
 
       {items.length > 0 &&
-        (recetaGuardada ? (
+        (comida.receta_guardada_id ? (
           <View style={estilos.guardarReceta}>
             <Ionicons name="checkmark-circle" size={18} color={colors.textSecondary} />
             <Text style={estilos.recetaGuardadaTexto}>Receta guardada</Text>

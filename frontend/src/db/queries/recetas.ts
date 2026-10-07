@@ -131,18 +131,20 @@ async function insertarIngredientes(recetaId: string, ingredientes: NuevoIngredi
   }
 }
 
+/** El INSERT de la receta y sus ingredientes, sin transaccion: la pone quien llama. */
+async function insertarReceta(datos: DatosReceta, t: string): Promise<void> {
+  await getDb().runAsync(
+    `INSERT INTO receta (id, usuario_id, nombre, porciones, usada_en, created_at, updated_at)
+     VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    [datos.id, datos.usuario_id, datos.nombre.trim(), datos.porciones, t, t],
+  );
+  await insertarIngredientes(datos.id, datos.ingredientes, t);
+}
+
 export async function crearReceta(datos: DatosReceta): Promise<RecetaCompleta> {
   if (datos.ingredientes.length === 0) throw new Error('Una receta sin ingredientes no se guarda.');
   const t = ahora();
-  const db = getDb();
-  await db.withTransactionAsync(async () => {
-    await db.runAsync(
-      `INSERT INTO receta (id, usuario_id, nombre, porciones, usada_en, created_at, updated_at)
-       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
-      [datos.id, datos.usuario_id, datos.nombre.trim(), datos.porciones, t, t],
-    );
-    await insertarIngredientes(datos.id, datos.ingredientes, t);
-  });
+  await getDb().withTransactionAsync(() => insertarReceta(datos, t));
   const res = await obtenerReceta(datos.id);
   if (!res) throw new Error(`No se pudo leer la receta creada: ${datos.id}`);
   return res;
@@ -239,7 +241,8 @@ export async function marcarUsada(recetaId: string): Promise<void> {
 
 /**
  * "Guardar como receta" desde el detalle de una comida: rinde 1 porcion y
- * copia los items con sus cantidades y su estado de carga.
+ * copia los items con sus cantidades y su estado de carga. La comida queda
+ * apuntando a la receta (receta_guardada_id), en la misma transaccion.
  */
 export async function guardarComidaComoReceta(datos: {
   comidaId: string;
@@ -248,7 +251,8 @@ export async function guardarComidaComoReceta(datos: {
   recetaId?: string;
 }): Promise<RecetaCompleta> {
   const items = await listarItems(datos.comidaId);
-  return crearReceta({
+  if (items.length === 0) throw new Error('Una receta sin ingredientes no se guarda.');
+  const receta: DatosReceta = {
     id: datos.recetaId ?? randomUUID(),
     usuario_id: datos.usuarioId,
     nombre: datos.nombre,
@@ -259,5 +263,18 @@ export async function guardarComidaComoReceta(datos: {
       estado_carga: it.estado_carga,
       cantidad_ingresada_g: it.cantidad_ingresada_g,
     })),
+  };
+  const t = ahora();
+  const db = getDb();
+  await db.withTransactionAsync(async () => {
+    await insertarReceta(receta, t);
+    await db.runAsync('UPDATE comida SET receta_guardada_id = ?, updated_at = ? WHERE id = ?', [
+      receta.id,
+      t,
+      datos.comidaId,
+    ]);
   });
+  const res = await obtenerReceta(receta.id);
+  if (!res) throw new Error(`No se pudo leer la receta creada: ${receta.id}`);
+  return res;
 }

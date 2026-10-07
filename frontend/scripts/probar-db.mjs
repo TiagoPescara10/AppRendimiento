@@ -3543,6 +3543,50 @@ await prueba('historial: totales por dia en SQL, por dia local aunque cruce la m
   await schema.cerrarDb();
 });
 
+// --- comida guardada como receta (migracion 024) ---------------------------
+
+await prueba('la 024 sobre una base v23: la comida queda sin receta guardada', async () => {
+  const db = await sqlite.openDatabaseAsync(join(tmp, 'v24-test.db'));
+  await db.execAsync('PRAGMA foreign_keys = ON;');
+  for (let v = 1; v <= 23; v++) {
+    await db.execAsync(migrations.migraciones.find((mig) => mig.version === v).sql);
+  }
+  await db.execAsync('PRAGMA user_version = 23');
+  const t = '2026-09-01T00:00:00.000Z';
+  await db.runAsync("INSERT INTO perfil (id, fecha_alta, created_at, updated_at) VALUES ('u-24', '2026-09-01', ?, ?)", [t, t]);
+  await db.runAsync(
+    `INSERT INTO comida (id, usuario_id, fecha_hora, tipo, created_at, updated_at)
+     VALUES ('co-24', 'u-24', '2026-09-01T13:00:00-03:00', 'almuerzo', ?, ?)`, [t, t]);
+
+  igual(await migrations.migrar(db), migrations.VERSION_ESQUEMA, 'queda en la ultima');
+  const c = await db.getFirstAsync("SELECT * FROM comida WHERE id = 'co-24'");
+  igual(c.tipo, 'almuerzo', 'la comida sigue');
+  igual(c.receta_guardada_id, null, 'sin receta guardada');
+  await db.closeAsync();
+});
+
+await prueba('guardar como receta deja la comida marcada; borrar la receta la desmarca; repetir no la copia', async () => {
+  await baseRecetas('v24-marca.db');
+  await qComidas.crearComidaConItems(
+    { id: 'co-m', usuario_id: 'u-r', fecha_hora: '2026-10-06T13:00:00-03:00', tipo: 'almuerzo' },
+    [{ id: 'm1', alimento_id: 'al-masa', cantidad_g: 120 }],
+  );
+  igual((await qComidas.obtenerComida('co-m')).receta_guardada_id, null, 'antes, sin marca');
+
+  const r = await qRecetas.guardarComidaComoReceta({ comidaId: 'co-m', usuarioId: 'u-r', nombre: 'Almuerzo' });
+  igual((await qComidas.obtenerComida('co-m')).receta_guardada_id, r.id, 'marcada con la receta');
+  const enHistorial = await qComidas.comidasPorRango('u-r', '2026-10-06', '2026-10-06');
+  igual(enHistorial[0].receta_guardada_id, r.id, 'el historial la ve marcada');
+
+  const copia = await qComidas.repetirComida('co-m', '2026-10-07T13:00:00-03:00', 'co-m2');
+  igual(copia.receta_guardada_id, null, 'la copia no queda marcada');
+
+  await qRecetas.borrarReceta(r.id);
+  igual((await qComidas.obtenerComida('co-m')).receta_guardada_id, null, 'borrada la receta, se desmarca');
+  igual((await qComidas.listarItems('co-m')).length, 1, 'la comida sigue con sus items');
+  await schema.cerrarDb();
+});
+
 // --- salida ----------------------------------------------------------------
 
 rmSync(tmp, { recursive: true, force: true });
