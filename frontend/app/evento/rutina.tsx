@@ -12,10 +12,12 @@
 // - Fila en edicion con alto contraste (borde 2px action, fondo acentuado).
 // - Scroll suave automatico al saltar al siguiente ejercicio.
 // - Keypad numerico tactil integrado al pie con shadow.sheet y atajos rapidos (+1.25, +2.5, +5, Corporal).
-// - Superseries y circuitos: los ejercicios de un grupo van en un recuadro,
-//   abiertos a la vez, y el foco avanza en ronda (A1 -> B1 -> A2...). El
-//   acordeon de "uno abierto por vez" aplica a unidades (grupo o suelto). El
-//   orden sale de src/features/entrenamiento/rondas.ts.
+// - Un solo ejercicio abierto a la vez, tambien dentro de una superserie o
+//   circuito: el recuadro solo agrupa. Al entrar esta todo cerrado.
+// - Superseries y circuitos: el foco avanza en ronda (A1 -> B1 -> A2...). El
+//   orden sale de src/features/entrenamiento/rondas.ts. Si el foco pasa a otro
+//   ejercicio, se cierra el actual, se abre el siguiente y la pantalla
+//   scrollea hasta la fila activa, por encima del teclado (ver "Scroll").
 // - Sin timers de descanso. El unico cronometro es el de las series por tiempo
 //   (plancha, cardio): cuenta hacia arriba mientras se hace el ejercicio y al
 //   parar carga el tiempo en la serie. Ver useCronometroSerie.ts.
@@ -65,7 +67,12 @@ import {
   textoDuracion,
 } from '@/lib/duracion';
 import { useCronometroSerie } from '@/features/entrenamiento/useCronometroSerie';
-import { siguienteFoco } from '@/features/entrenamiento/rondas';
+import {
+  ejercicioQueToca,
+  siguienteFoco,
+  textoAvance,
+  textoUltimaHecha,
+} from '@/features/entrenamiento/rondas';
 import { etiquetaGrupo } from '@/lib/superseries';
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
@@ -145,6 +152,9 @@ function seriesParaGuardar(item: EjercicioEnSesion): SerieBorrador[] {
 
 type Campo = 'kg' | 'reps' | 'tiempo';
 
+/** Alto del teclado hasta que se mide de verdad en su onLayout. */
+const ALTO_TECLADO_INICIAL = 380;
+
 interface EjercicioEnSesion {
   /**
    * Identifica la tarjeta: bloque + ejercicio. Con calentamiento el mismo
@@ -221,7 +231,26 @@ export default function SesionRutina() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
-  const posicionesY = useRef<Record<string, number>>({});
+  // --- Scroll -------------------------------------------------------------
+  // Se mide con measureLayout contra el contenido del ScrollView: la fila de
+  // una serie esta anidada en su tarjeta (y en el recuadro del grupo), asi que
+  // la `y` de su onLayout es relativa al padre y no sirve.
+  // El View interno del ScrollView: el origen de las medidas y de scrollTo.
+  // El null! es por el tipo de innerViewRef (RefObject<View> sin null): hasta
+  // montar vale null igual, y resolverScroll lo chequea.
+  const contenidoRef = useRef<View>(null!);
+  const tarjetasRef = useRef<Record<string, View | null>>({});
+  const filasRef = useRef<Record<string, View | null>>({});
+  const scrollY = useRef(0);
+  const altoScroll = useRef(0);
+  const [altoTeclado, setAltoTeclado] = useState(ALTO_TECLADO_INICIAL);
+  /**
+   * Scroll que falta hacer hasta la fila de `serieId`. Con `cambio` (el foco
+   * paso a otro ejercicio) la cabecera queda arriba; sin el, solo se mueve si
+   * la fila quedo tapada. Se resuelve cuando la fila tiene su layout: en su
+   * onLayout si recien se monto, o en el frame siguiente si ya estaba.
+   */
+  const scrollPendiente = useRef<{ serieId: string; cambio: boolean } | null>(null);
 
   const params = useLocalSearchParams<{
     rutinaGimnasioId?: string;
@@ -241,7 +270,10 @@ export default function SesionRutina() {
   );
 
   // Acordeon y seleccion de serie activa para el keypad
+  // El unico ejercicio abierto (clave), o ninguno
   const [ejercicioExpandidoId, setEjercicioExpandidoId] = useState<string | null>(null);
+  // Ultimo ejercicio al que fue el foco: es "el que toca" mientras le queden series
+  const [ultimoFoco, setUltimoFoco] = useState<string | null>(null);
   const [serieActiva, setSerieActiva] = useState<SeleccionSerie | null>(null);
   const [campoActivo, setCampoActivo] = useState<Campo>('kg');
   const cronometro = useCronometroSerie();
@@ -316,20 +348,9 @@ export default function SesionRutina() {
             return { clave, bloque: ej.bloque, grupo: ej.grupo_rutina, ejercicio: ej, series };
           });
 
+          // Todo cerrado: el usuario abre el que va a hacer primero. El que
+          // toca se marca igual (ejercicioQueToca).
           setEjerciciosSesion(inicial);
-
-          // Desplegar el primer ejercicio y enfocar su primera serie
-          if (inicial.length > 0) {
-            const primerEj = inicial[0];
-            setEjercicioExpandidoId(unidadDe(primerEj));
-            if (primerEj.series.length > 0) {
-              setSerieActiva({
-                clave: primerEj.clave,
-                serieId: primerEj.series[0].id,
-              });
-              setCampoActivo(campoInicial(primerEj.ejercicio, mapa.get(primerEj.clave)));
-            }
-          }
         }
       }
     })().catch(console.error);
@@ -401,7 +422,9 @@ export default function SesionRutina() {
 
     setEjerciciosSesion((prev) => [...prev, nuevoItem]);
     setEjercicioExpandidoId(clave);
+    setUltimoFoco(clave);
     if (nuevasSeries.length > 0) {
+      scrollPendiente.current = { serieId: nuevasSeries[0].id, cambio: true };
       setSerieActiva({ clave, serieId: nuevasSeries[0].id });
       setCampoActivo(campoInicial(ej, previas));
     }
@@ -432,22 +455,23 @@ export default function SesionRutina() {
     }
   };
 
-  // Alternar acordeon de una unidad (ejercicio suelto o grupo entero)
-  const toggleAcordeon = (unidad: string) => {
-    if (ejercicioExpandidoId === unidad) {
+  // Abrir un ejercicio cierra el que estaba abierto, tambien dentro de un grupo
+  const toggleAcordeon = (clave: string) => {
+    if (ejercicioExpandidoId === clave) {
       setEjercicioExpandidoId(null);
       setSerieActiva(null);
+      return;
+    }
+    setEjercicioExpandidoId(clave);
+    setUltimoFoco(clave);
+    const item = ejerciciosSesion.find((e) => e.clave === clave);
+    // Al abrir, enfocar su primera serie pendiente
+    const pendiente = item?.series.find((s) => !s.confirmada);
+    if (item && pendiente) {
+      scrollPendiente.current = { serieId: pendiente.id, cambio: true };
+      setSerieActiva({ clave, serieId: pendiente.id });
+      setCampoActivo(campoInicial(item.ejercicio, referenciasPrevias.get(clave)));
     } else {
-      setEjercicioExpandidoId(unidad);
-      // Al abrir, enfocar la primera serie pendiente de la unidad, en orden
-      for (const item of ejerciciosSesion.filter((e) => unidadDe(e) === unidad)) {
-        const pendiente = item.series.find((s) => !s.confirmada);
-        if (pendiente) {
-          setSerieActiva({ clave: item.clave, serieId: pendiente.id });
-          setCampoActivo(campoInicial(item.ejercicio, referenciasPrevias.get(item.clave)));
-          return;
-        }
-      }
       // Si todo esta confirmado, no abrir el keypad hasta que toque explicitamente
       setSerieActiva(null);
     }
@@ -688,13 +712,15 @@ export default function SesionRutina() {
       }
 
       if (siguientePendiente) {
-        const destino = ejerciciosSesion.find((e) => e.clave === siguientePendiente.claveEj);
-        if (destino) setEjercicioExpandidoId(unidadDe(destino));
+        const cambio = siguientePendiente.claveEj !== serieActiva.clave;
+        setEjercicioExpandidoId(siguientePendiente.claveEj);
+        setUltimoFoco(siguientePendiente.claveEj);
+        scrollPendiente.current = { serieId: siguientePendiente.serieId, cambio };
         setSerieActiva({ clave: siguientePendiente.claveEj, serieId: siguientePendiente.serieId });
         setCampoActivo(siguientePendiente.campo);
       } else {
-        // No hay pendientes: cerrar keypad limpiamente
-        setSerieActiva(null);
+        // No hay pendientes: cerrar todo y volver arriba
+        terminarRutina();
       }
       return;
     }
@@ -709,28 +735,89 @@ export default function SesionRutina() {
     const destino = foco ? ejerciciosSesion.find((e) => e.clave === foco.clave) : undefined;
 
     if (!foco || !destino) {
-      // Caso limite: completada la ultima serie del ultimo ejercicio.
-      // Colapsar todo, cerrar keypad y dejar visible "Finalizar".
-      setEjercicioExpandidoId(null);
-      setSerieActiva(null);
+      // Completada la ultima serie de la rutina
+      terminarRutina();
       return;
     }
 
+    // Si el foco pasa a otro ejercicio, se cierra el actual y se abre ese. El
+    // scroll espera a que la fila tenga su layout (ver resolverScroll).
+    const cambio = destino.clave !== itemActivo.clave;
+    scrollPendiente.current = { serieId: foco.serieId, cambio };
+    if (cambio) setEjercicioExpandidoId(destino.clave);
+    setUltimoFoco(destino.clave);
     setSerieActiva(foco);
     setCampoActivo(campoInicial(destino.ejercicio, referenciasPrevias.get(destino.clave)));
-
-    const unidadDestino = unidadDe(destino);
-    if (unidadDestino !== unidadDe(itemActivo)) {
-      setEjercicioExpandidoId(unidadDestino);
-      // Scroll suave hacia la unidad recien desplegada
-      setTimeout(() => {
-        const posY = posicionesY.current[unidadDestino];
-        if (posY !== undefined && scrollRef.current) {
-          scrollRef.current.scrollTo({ y: Math.max(0, posY - spacing.sm), animated: true });
-        }
-      }, 70);
-    }
   };
+
+  // No quedan series: todo cerrado, sin teclado, y la lista desde arriba.
+  // Finalizar esta en la cabecera fija, siempre a la vista.
+  const terminarRutina = () => {
+    scrollPendiente.current = null;
+    setEjercicioExpandidoId(null);
+    setSerieActiva(null);
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  };
+
+  // ---------------------------------------------------------------------------
+  // Scroll hasta la fila activa
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Hace el scroll pendiente si la fila ya tiene layout. La zona visible va
+   * del borde de arriba del ScrollView al borde de arriba del teclado.
+   *
+   * Con `cambio`, la cabecera del ejercicio queda arriba, y si asi la fila
+   * sigue tapada por el teclado, baja lo justo para que se vea. Sin `cambio`,
+   * solo se mueve si la fila esta fuera de la zona visible.
+   */
+  const resolverScroll = () => {
+    const pendiente = scrollPendiente.current;
+    const contenido: View | null = contenidoRef.current;
+    if (!pendiente || !contenido) return;
+    const fila = filasRef.current[pendiente.serieId];
+    const clave = ejerciciosSesion.find((e) => e.series.some((x) => x.id === pendiente.serieId))?.clave;
+    const tarjeta = clave ? tarjetasRef.current[clave] : null;
+    if (!fila || !tarjeta) return;
+
+    scrollPendiente.current = null;
+    fila.measureLayout(contenido, (_x, filaY, _w, filaAlto) => {
+      tarjeta.measureLayout(contenido, (_x2, tarjetaY) => {
+        const margen = spacing.sm;
+        const visible = altoScroll.current - altoTeclado;
+        const filaAbajo = filaY + filaAlto;
+        let destino: number | null = null;
+
+        if (pendiente.cambio) {
+          destino = tarjetaY - margen;
+          if (filaAbajo - destino > visible - margen) destino = filaAbajo - visible + margen;
+        } else if (filaY < scrollY.current + margen) {
+          destino = filaY - margen;
+        } else if (filaAbajo > scrollY.current + visible - margen) {
+          destino = filaAbajo - visible + margen;
+        }
+
+        if (destino !== null) {
+          scrollRef.current?.scrollTo({ y: Math.max(0, destino), animated: true });
+        }
+      });
+    });
+  };
+
+  // Cualquier cambio de serie activa pide asegurar que se vea (tocar una fila,
+  // corregir, agregar serie). Si ya habia un pedido con `cambio` para esta
+  // serie, se respeta. El frame siguiente cubre la fila que ya estaba
+  // montada: su onLayout no vuelve a disparar.
+  useEffect(() => {
+    if (!serieActiva) return;
+    if (scrollPendiente.current?.serieId !== serieActiva.serieId) {
+      scrollPendiente.current = { serieId: serieActiva.serieId, cambio: false };
+    }
+    const id = requestAnimationFrame(resolverScroll);
+    return () => cancelAnimationFrame(id);
+    // Solo al cambiar la serie o el ejercicio abierto
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serieActiva?.serieId, ejercicioExpandidoId]);
 
   // ---------------------------------------------------------------------------
   // Guardar y Salir
@@ -871,28 +958,39 @@ export default function SesionRutina() {
 
   // Una tarjeta de ejercicio con su tabla de series. Adentro de un grupo se
   // abre y cierra con el recuadro, no por su cuenta.
+  const claveQueToca = ejercicioQueToca(
+    ejerciciosSesion.map((e) => ({ clave: e.clave, unidad: unidadDe(e), series: e.series })),
+    ultimoFoco,
+  );
+
   const renderTarjeta = (item: EjercicioEnSesion, expandido: boolean, enGrupo: boolean) => {
     const claveEj = item.clave;
     const previas = referenciasPrevias.get(claveEj) ?? [];
     const pendientes = item.series.filter((s) => !s.confirmada).length;
     const completado = item.series.length > 0 && pendientes === 0;
     const porTiempo = esPorTiempo(item.ejercicio);
+    const ultimaHecha = textoUltimaHecha(item.series, porTiempo);
+    // El que toca se nota aunque este cerrado, por si el usuario scrolleo solo
+    const tocaAhora = !expandido && claveQueToca === claveEj;
 
     return (
               <View
                 key={claveEj}
+                ref={(r) => {
+                  tarjetasRef.current[claveEj] = r;
+                }}
                 style={[
                   estilos.acordeonCard,
                   expandido && estilos.acordeonCardExpandido,
                   enGrupo && estilos.acordeonCardEnGrupo,
+                  tocaAhora && estilos.acordeonCardQueToca,
                 ]}
               >
-                {/* Cabecera del acordeon */}
-                {/* En un grupo la cabecera no pliega: abre y cierra el recuadro entero */}
+                {/* Cabecera del acordeon: abre este y cierra el que estaba abierto */}
                 <Pressable
                   style={estilos.acordeonCabecera}
-                  onPress={() => toggleAcordeon(unidadDe(item))}
-                  disabled={enGrupo}
+                  onPress={() => toggleAcordeon(claveEj)}
+                  accessibilityState={{ expanded: expandido }}
                 >
                   <View style={estilos.acordeonInfo}>
                     <Text style={estilos.acordeonTitulo}>{item.ejercicio.nombre}</Text>
@@ -904,19 +1002,18 @@ export default function SesionRutina() {
                     ) : (
                       <View style={estilos.chipPendiente}>
                         <Text style={estilos.chipPendienteTexto}>
-                          {pendientes} {pendientes === 1 ? 'serie pendiente' : 'series pendientes'}
+                          {textoAvance(item.series)}
+                          {ultimaHecha ? ` · última ${ultimaHecha}` : ''}
                         </Text>
                       </View>
                     )}
                   </View>
 
-                  {!enGrupo && (
-                    <Ionicons
-                      name={expandido ? 'chevron-up' : 'chevron-down'}
-                      size={20}
-                      color={colors.textSecondary}
-                    />
-                  )}
+                  <Ionicons
+                    name={expandido ? 'chevron-up' : 'chevron-down'}
+                    size={20}
+                    color={colors.textSecondary}
+                  />
                 </Pressable>
 
                 {/* Contenido desplegado: tabla de series */}
@@ -1014,6 +1111,12 @@ export default function SesionRutina() {
                         return (
                           <Pressable
                             key={s.id}
+                            ref={(r) => {
+                              filasRef.current[s.id] = r;
+                            }}
+                            onLayout={() => {
+                              if (scrollPendiente.current?.serieId === s.id) resolverScroll();
+                            }}
                             style={[
                               estilos.tablaFila,
                               s.confirmada && estilos.tablaFilaConfirmada,
@@ -1204,11 +1307,20 @@ export default function SesionRutina() {
       {/* 2. Scroll de lista de ejercicios */}
       <ScrollView
         ref={scrollRef}
+        innerViewRef={contenidoRef}
         style={estilos.scrollArea}
         contentContainerStyle={[
           estilos.scrollContenido,
-          { paddingBottom: serieActiva ? 380 : spacing.xxxl },
+          // Con el teclado, el pie deja lugar para que la ultima fila suba por encima
+          { paddingBottom: serieActiva ? altoTeclado + spacing.lg : spacing.xxxl },
         ]}
+        onLayout={(e) => {
+          altoScroll.current = e.nativeEvent.layout.height;
+        }}
+        onScroll={(e) => {
+          scrollY.current = e.nativeEvent.contentOffset.y;
+        }}
+        scrollEventThrottle={32}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
@@ -1232,26 +1344,24 @@ export default function SesionRutina() {
                   ? 'Calentamiento'
                   : 'Principal'
                 : null;
-            const expandido = ejercicioExpandidoId === unidad.clave;
             const pendientesGrupo = unidad.items.reduce(
               (n, e) => n + e.series.filter((s) => !s.confirmada).length,
               0,
             );
 
             return (
-              <View
-                key={unidad.clave}
-                onLayout={(e) => {
-                  posicionesY.current[unidad.clave] = e.nativeEvent.layout.y;
-                }}
-              >
+              <View key={unidad.clave}>
                 {tituloBloque && <Text style={estilos.tituloBloque}>{tituloBloque}</Text>}
                 {unidad.items.length > 1 ? (
-                  <View style={[estilos.grupoCaja, expandido && estilos.grupoCajaExpandida]}>
-                    <Pressable
-                      style={estilos.grupoCabecera}
-                      onPress={() => toggleAcordeon(unidad.clave)}
-                    >
+                  <View
+                    style={[
+                      estilos.grupoCaja,
+                      unidad.items.some((e) => e.clave === ejercicioExpandidoId) &&
+                        estilos.grupoCajaExpandida,
+                    ]}
+                  >
+                    {/* El recuadro solo agrupa: cada ejercicio se abre por su cuenta */}
+                    <View style={estilos.grupoCabecera}>
                       <Ionicons name="link-outline" size={16} color={colors.action} />
                       <Text style={estilos.grupoEtiqueta}>{etiquetaGrupo(unidad.items.length)}</Text>
                       <Text style={estilos.grupoPendientes}>
@@ -1259,16 +1369,13 @@ export default function SesionRutina() {
                           ? 'Completado'
                           : `${pendientesGrupo} ${pendientesGrupo === 1 ? 'pendiente' : 'pendientes'}`}
                       </Text>
-                      <Ionicons
-                        name={expandido ? 'chevron-up' : 'chevron-down'}
-                        size={20}
-                        color={colors.textSecondary}
-                      />
-                    </Pressable>
-                    {unidad.items.map((item) => renderTarjeta(item, expandido, true))}
+                    </View>
+                    {unidad.items.map((item) =>
+                      renderTarjeta(item, ejercicioExpandidoId === item.clave, true),
+                    )}
                   </View>
                 ) : (
-                  renderTarjeta(primero, expandido, false)
+                  renderTarjeta(primero, ejercicioExpandidoId === primero.clave, false)
                 )}
               </View>
             );
@@ -1287,7 +1394,20 @@ export default function SesionRutina() {
 
       {/* 3. Keypad numerico integrado al pie */}
       {serieActiva && (
-        <View style={[estilos.keypadContenedor, { paddingBottom: Math.max(insets.bottom, 14) }]}>
+        <View
+          style={[estilos.keypadContenedor, { paddingBottom: Math.max(insets.bottom, 14) }]}
+          onLayout={(e) => {
+            // El alto cambia con el cronometro o los atajos. Si crece y tapa la
+            // fila activa, se vuelve a asegurar que se vea.
+            const alto = Math.round(e.nativeEvent.layout.height);
+            if (alto === altoTeclado) return;
+            setAltoTeclado(alto);
+            if (serieActiva && !scrollPendiente.current) {
+              scrollPendiente.current = { serieId: serieActiva.serieId, cambio: false };
+              requestAnimationFrame(resolverScroll);
+            }
+          }}
+        >
           {/* Fila de contexto y selector de campo */}
           <View style={estilos.keypadFilaContexto}>
             <View style={estilos.keypadContextoInfo}>
@@ -1914,6 +2034,11 @@ const estilos = StyleSheet.create({
     fontSize: fontSize.caption,
     fontWeight: '600',
     color: colors.textSecondary,
+  },
+  // El ejercicio que toca ahora, cerrado
+  acordeonCardQueToca: {
+    borderColor: colors.action,
+    backgroundColor: colors.accentSoft,
   },
   acordeonCardEnGrupo: {
     shadowOpacity: 0,

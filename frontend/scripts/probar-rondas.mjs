@@ -39,6 +39,7 @@ writeFileSync(
     include: [
       join(RAIZ, 'src/lib/superseries.ts'),
       join(RAIZ, 'src/features/entrenamiento/rondas.ts'),
+      join(RAIZ, 'src/lib/duracion.ts'),
     ],
   }),
 );
@@ -215,6 +216,34 @@ prueba('un suelto se comporta como antes: su serie siguiente, despues el proximo
   const unidades = [['s0', { A: 3 }], ['s1', { B: 2 }]];
   igual(recorrido(unidades, 'A1'), 'A1 A2 A3 B1 B2', 'sueltos');
   igual(R.siguienteFoco(sesion(unidades, ['A1', 'A2', 'A3', 'B1']), 'B', 'B2'), null, 'nada pendiente');
+});
+
+// ---------------------------------------------------------------------------
+// Cabecera de un ejercicio cerrado
+// ---------------------------------------------------------------------------
+
+console.log('\ncabecera de un ejercicio cerrado:');
+
+prueba('el que toca: al entrar el primero con pendientes, despues el del ultimo foco', () => {
+  const unidades = [['s0', { X: 1 }], ['g1', { A: 2, B: 2 }]];
+  igual(R.ejercicioQueToca(sesion(unidades), null), 'X', 'al entrar');
+  igual(R.ejercicioQueToca(sesion(unidades, ['X1']), null), 'A', 'el primero ya hecho');
+  igual(R.ejercicioQueToca(sesion(unidades, ['A1']), 'B'), 'B', 'el del ultimo foco aunque haya otro antes');
+  igual(R.ejercicioQueToca(sesion(unidades, ['B1', 'B2']), 'B'), 'X', 'el foco termino: el primero con pendientes');
+  igual(R.ejercicioQueToca(sesion(unidades, ['X1', 'A1', 'A2', 'B1', 'B2']), 'B'), null, 'todo hecho');
+  igual(R.ejercicioQueToca(sesion(unidades), 'no-existe'), 'X', 'foco de un ejercicio quitado');
+});
+
+prueba('avance y ultima serie hecha', () => {
+  const s = (confirmada, repeticiones, pesoKg = null, duracionSeg = null) => ({ confirmada, repeticiones, pesoKg, duracionSeg });
+  igual(R.textoAvance([s(true, 8), s(false, 8), s(false, 8), s(false, 8)]), '1 de 4 series', 'avance');
+  igual(R.textoAvance([s(false, 8)]), '0 de 1 serie', 'singular');
+  igual(R.textoUltimaHecha([s(true, 8, 80), s(true, 6, 85), s(false, 6, 85)], false), '85 × 6', 'con peso: la ultima hecha');
+  igual(R.textoUltimaHecha([s(true, 12, null)], false), 'Corp × 12', 'corporal');
+  igual(R.textoUltimaHecha([s(true, 10, null, 60), s(false, 10, null, 45)], true), '1:00', 'por tiempo');
+  igual(R.textoUltimaHecha([s(false, 8, 80)], false), null, 'ninguna hecha');
+  // Una hecha fuera de orden: cuenta la de mas abajo, no la ultima tocada
+  igual(R.textoUltimaHecha([s(false, 8, 80), s(true, 6, 90), s(false, 8, 80)], false), '90 × 6', 'fuera de orden');
 });
 
 // --- resumen final ---------------------------------------------------------

@@ -14,6 +14,10 @@
 // - un suelto es una unidad de uno: va a su siguiente serie pendiente.
 // Cuando la unidad no tiene mas pendientes, el foco pasa a la siguiente
 // unidad con pendientes, y si no hay, da la vuelta desde el principio.
+//
+// Abajo, lo que muestra la cabecera de un ejercicio cerrado.
+
+import { textoDuracion } from '../../lib/duracion';
 
 export interface EjercicioRonda {
   clave: string;
@@ -61,4 +65,49 @@ export function siguienteFoco(lista: EjercicioRonda[], clave: string, serieId: s
     if (foco) return foco;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Cabecera de un ejercicio cerrado
+// ---------------------------------------------------------------------------
+
+/**
+ * El ejercicio que toca ahora, para marcarlo aunque este cerrado: el del
+ * ultimo foco mientras le queden series, y si no (o al entrar a la rutina),
+ * el primero con algo pendiente. null si no queda nada.
+ */
+export function ejercicioQueToca(lista: EjercicioRonda[], ultimoFoco: string | null): string | null {
+  const pendiente = (e: EjercicioRonda) => e.series.some((s) => !s.confirmada);
+  const foco = ultimoFoco === null ? undefined : lista.find((e) => e.clave === ultimoFoco);
+  if (foco && pendiente(foco)) return foco.clave;
+  return lista.find(pendiente)?.clave ?? null;
+}
+
+/** "1 de 4 series". */
+export function textoAvance(series: { confirmada: boolean }[]): string {
+  const hechas = series.filter((s) => s.confirmada).length;
+  return `${hechas} de ${series.length} ${series.length === 1 ? 'serie' : 'series'}`;
+}
+
+/** Lo minimo de una serie para describirla en la cabecera. */
+export interface SerieHechaCabecera {
+  confirmada: boolean;
+  repeticiones: number;
+  pesoKg: number | null;
+  duracionSeg: number | null;
+}
+
+/**
+ * La ultima serie hecha, como en la columna Anterior: "80 × 8", "Corp × 12"
+ * o "1:00". "Ultima" es la de mas abajo de las confirmadas, no la ultima que
+ * se toco. null si no hay ninguna hecha.
+ */
+export function textoUltimaHecha(series: SerieHechaCabecera[], porTiempo: boolean): string | null {
+  const hechas = series.filter((s) => s.confirmada);
+  const ultima = hechas[hechas.length - 1];
+  if (!ultima) return null;
+  if (porTiempo) return ultima.duracionSeg ? textoDuracion(ultima.duracionSeg) : null;
+  return ultima.pesoKg !== null && ultima.pesoKg > 0
+    ? `${ultima.pesoKg} × ${ultima.repeticiones}`
+    : `Corp × ${ultima.repeticiones}`;
 }
