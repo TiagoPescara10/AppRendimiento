@@ -1,8 +1,13 @@
 // Registro de una comida. El flujo es: elegis el tipo (ya viene sugerido por
 // la hora), buscas alimentos, y por cada uno elegis cuanto comiste. Nada se
 // escribe en la base hasta que tocas "Guardar comida".
+//
+// El buscador tambien encuentra recetas, primero y con su etiqueta. Una
+// receta se suma con sus porciones y al guardar se convierte en sus
+// ingredientes escalados, agrupados (ver src/lib/recetas.ts).
 
 import { useState, useEffect, useRef } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { View, Text, Pressable, StyleSheet, Alert, Modal, TextInput } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
@@ -13,7 +18,12 @@ import type { DatosSheet } from '@/features/comidas/components/SheetPorciones';
 import { BuscadorAlimentos } from '@/features/comidas/components/BuscadorAlimentos';
 import { TarjetaTotales } from '@/features/comidas/components/TarjetaTotales';
 import { TIPOS_COMIDA, tipoPorHora } from '@/features/comidas/tipos';
-import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
+import { SheetAgregarReceta } from '@/features/comidas/components/SheetAgregarReceta';
+import { buscarRecetas, itemsDeReceta, marcarUsada, obtenerReceta } from '@/db/queries/recetas';
+import type { RecetaCompleta, RecetaConResumen } from '@/db/queries/recetas';
+import { porPorcion, textoPorciones } from '@/lib/recetas';
+import type { Macros } from '@/lib/recetas';
+import { colors, spacing, radius, fontSize, fontWeight, lineHeight, shadow, sizes } from '@/ui/theme';
 
 import type { Alimento } from '@/db/queries/alimentos';
 import { crearComidaConItems } from '@/db/queries/comidas';
@@ -36,6 +46,14 @@ type ItemPendiente = {
   cantidad_g: number;
   porcion: string;
   carga: CargaCoccion | null;
+};
+
+/** Una receta sumada a la comida, todavia sin guardar. */
+type RecetaPendiente = {
+  receta: RecetaCompleta;
+  porciones: number;
+  /** Valores de UNA porcion, para los totales en vivo. */
+  porPorcion: Macros;
 };
 
 const TIPOS = TIPOS_COMIDA;
@@ -66,7 +84,61 @@ export default function NuevaComida() {
   const [selectorAbierto, setSelectorAbierto] = useState(false);
   const [busqueda, setBusqueda] = useState(params.busqueda ?? '');
   const [items, setItems] = useState<ItemPendiente[]>([]);
+  const [recetas, setRecetas] = useState<RecetaPendiente[]>([]);
   const [guardando, setGuardando] = useState(false);
+  const [usuarioId, setUsuarioId] = useState<string | null>(null);
+  const [recetasEncontradas, setRecetasEncontradas] = useState<RecetaConResumen[]>([]);
+  // Receta elegida en el buscador, esperando las porciones. indice: editar una ya sumada.
+  const [recetaSheet, setRecetaSheet] = useState<{
+    receta: RecetaCompleta;
+    kcal_porcion: number;
+    indice: number | null;
+  } | null>(null);
+
+  useEffect(() => {
+    obtenerPerfilLocal()
+      .then((p) => setUsuarioId(p?.id ?? null))
+      .catch((e) => console.error('Error al cargar el perfil:', e));
+  }, []);
+
+  // Las recetas que coinciden van primero en los resultados
+  useEffect(() => {
+    if (!usuarioId || !busqueda.trim()) {
+      setRecetasEncontradas([]);
+      return;
+    }
+    let vivo = true;
+    buscarRecetas(usuarioId, busqueda)
+      .then((r) => { if (vivo) setRecetasEncontradas(r); })
+      .catch((e) => console.error('Error al buscar recetas:', e));
+    return () => { vivo = false; };
+  }, [usuarioId, busqueda]);
+
+  const elegirReceta = async (r: RecetaConResumen) => {
+    const completa = await obtenerReceta(r.id);
+    if (!completa) return;
+    setRecetaSheet({ receta: completa, kcal_porcion: r.kcal_porcion, indice: null });
+  };
+
+  const confirmarReceta = (porciones: number) => {
+    if (!recetaSheet) return;
+    const { receta, indice } = recetaSheet;
+    const nueva: RecetaPendiente = {
+      receta,
+      porciones,
+      porPorcion: porPorcion(receta.items, receta.porciones),
+    };
+    setRecetas((prev) =>
+      indice === null ? [...prev, nueva] : prev.map((r, i) => (i === indice ? nueva : r)),
+    );
+    setRecetaSheet(null);
+    setBusqueda('');
+  };
+
+  const quitarReceta = (indice: number) =>
+    setRecetas((prev) => prev.filter((_, i) => i !== indice));
+
+  const hayAlgo = items.length > 0 || recetas.length > 0;
   const buscador = useRef<TextInput>(null);
 
   // Sin permiso de camara se vuelve aca para cargar a mano: el teclado ya
@@ -108,7 +180,7 @@ export default function NuevaComida() {
 
   // Totales en vivo. Se redondea al final y no por item: redondear cada uno
   // hace que la suma de las partes no de el total que se muestra.
-  const totales = items.reduce(
+  const totalesItems = items.reduce(
     (acc, it) => {
       const f = it.cantidad_g / 100;
       return {
@@ -120,9 +192,18 @@ export default function NuevaComida() {
     },
     { kcal: 0, prot: 0, carb: 0, grasa: 0 },
   );
+  const totales = recetas.reduce(
+    (acc, r) => ({
+      kcal: acc.kcal + r.porPorcion.kcal * r.porciones,
+      prot: acc.prot + r.porPorcion.proteina * r.porciones,
+      carb: acc.carb + r.porPorcion.carbohidratos * r.porciones,
+      grasa: acc.grasa + r.porPorcion.grasa * r.porciones,
+    }),
+    totalesItems,
+  );
 
   const guardar = async () => {
-    if (guardando || items.length === 0) return;
+    if (guardando || !hayAlgo) return;
     setGuardando(true);
 
     try {
@@ -140,14 +221,19 @@ export default function NuevaComida() {
           tipo,
           fecha_hora: aISOLocal(new Date()),
         },
-        items.map((item) => ({
-          id: randomUUID(),
-          alimento_id: item.alimento.id,
-          cantidad_g: item.cantidad_g,
-          editado_por_usuario: false,
-          carga: item.carga,
-        })),
+        [
+          ...recetas.flatMap((r) => itemsDeReceta(r.receta, r.porciones)),
+          ...items.map((item) => ({
+            id: randomUUID(),
+            alimento_id: item.alimento.id,
+            cantidad_g: item.cantidad_g,
+            editado_por_usuario: false,
+            carga: item.carga,
+          })),
+        ],
       );
+      // Fuera de la transaccion: si esto fallara, la comida ya esta bien guardada
+      for (const r of recetas) await marcarUsada(r.receta.id);
 
       router.back();
     } catch (e) {
@@ -172,7 +258,7 @@ export default function NuevaComida() {
 
   // La camara guarda su propia comida: lo cargado aca sin guardar se perderia.
   const abrirCamara = (modo: 'foto' | 'codigo') => {
-    if (items.length === 0) {
+    if (!hayAlgo) {
       irACamara(modo);
       return;
     }
@@ -221,6 +307,23 @@ export default function NuevaComida() {
         onElegir={(a) => setSheet({ alimento: a, indice: null })}
         inputRef={buscador}
         altaInicial={{ marca: params.marca, codigo: params.codigo }}
+        hayAntes={recetasEncontradas.length > 0}
+        antesDeResultados={recetasEncontradas.map((r) => (
+          <Pressable
+            key={r.id}
+            style={estilos.resultadoReceta}
+            onPress={() => void elegirReceta(r)}
+          >
+            <View style={estilos.flex}>
+              <View style={estilos.recetaTituloFila}>
+                <Text style={estilos.nombre}>{r.nombre}</Text>
+                <Text style={estilos.etiquetaReceta}>Receta</Text>
+              </View>
+              <Text style={estilos.detalle}>{Math.round(r.kcal_porcion)} kcal por porción</Text>
+            </View>
+            <Text style={estilos.mas}>+</Text>
+          </Pressable>
+        ))}
         accesorios={
           <>
             <Pressable
@@ -243,12 +346,38 @@ export default function NuevaComida() {
 
       {/* Tres estados excluyentes: buscando (los resultados los muestra el
           buscador), vacio, o con items cargados. */}
-      {buscando ? null : items.length === 0 ? (
+      {buscando ? null : !hayAlgo ? (
         <View style={estilos.vacio}>
           <Text style={estilos.detalle}>Buscá lo que comiste para empezar.</Text>
         </View>
       ) : (
         <View style={estilos.lista}>
+          {recetas.map((r, i) => (
+            <Pressable
+              key={`receta-${r.receta.id}-${i}`}
+              style={estilos.item}
+              onPress={() =>
+                setRecetaSheet({ receta: r.receta, kcal_porcion: r.porPorcion.kcal, indice: i })
+              }
+            >
+              <View style={estilos.flex}>
+                <Text style={estilos.nombre}>{r.receta.nombre}</Text>
+                <Text style={estilos.porcion}>{textoPorciones(r.porciones)}</Text>
+              </View>
+              <View style={estilos.derecha}>
+                <Text style={estilos.nombre}>{Math.round(r.porPorcion.kcal * r.porciones)}</Text>
+                <Text style={estilos.unidad}>kcal</Text>
+              </View>
+              <Pressable
+                onPress={() => quitarReceta(i)}
+                hitSlop={10}
+                style={estilos.quitar}
+                accessibilityLabel={`Quitar ${r.receta.nombre}`}
+              >
+                <Ionicons name="close" size={18} color={colors.textMuted} />
+              </Pressable>
+            </Pressable>
+          ))}
           {items.map((item, i) => (
             <Pressable
               key={`${item.alimento.id}-${i}`}
@@ -273,7 +402,7 @@ export default function NuevaComida() {
       )}
 
       {/* Pie con totales. Solo cuando hay algo cargado. */}
-      {items.length > 0 && !buscando && (
+      {hayAlgo && !buscando && (
         <View style={estilos.pie}>
           <TarjetaTotales
             kcal={totales.kcal}
@@ -320,6 +449,15 @@ export default function NuevaComida() {
         onCerrar={() => setSheet(null)}
         onConfirmar={confirmarPorcion}
       />
+
+      {/* El tipo ya esta elegido arriba: aca solo las porciones */}
+      <SheetAgregarReceta
+        receta={recetaSheet && { nombre: recetaSheet.receta.nombre, kcal_porcion: recetaSheet.kcal_porcion }}
+        soloPorciones
+        textoBoton={recetaSheet?.indice != null ? 'Cambiar' : 'Sumar'}
+        onCerrar={() => setRecetaSheet(null)}
+        onConfirmar={(porciones) => confirmarReceta(porciones)}
+      />
     </Pantalla>
   );
 }
@@ -360,6 +498,28 @@ const estilos = StyleSheet.create({
     ...shadow.card,
   },
   derecha: { alignItems: 'flex-end' },
+  quitar: { paddingLeft: spacing.sm },
+
+  // Una receta en los resultados de la busqueda, antes de los alimentos
+  resultadoReceta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: sizes.hairline,
+    borderBottomColor: colors.border,
+  },
+  recetaTituloFila: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  etiquetaReceta: {
+    fontSize: fontSize.caption,
+    lineHeight: lineHeight.caption,
+    fontWeight: fontWeight.bold,
+    color: colors.textOnAccentSoft,
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: spacing.xs,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+  },
+  mas: { fontSize: fontSize.title, color: colors.action, paddingHorizontal: spacing.sm },
   unidad: { fontSize: fontSize.small, color: colors.textSecondary },
 
   nombre: { fontSize: fontSize.body, lineHeight: lineHeight.body, color: colors.textPrimary },

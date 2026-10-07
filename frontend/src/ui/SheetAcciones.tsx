@@ -9,6 +9,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontSize, lineHeight, radius, shadow, sizes, spacing } from './theme';
 
+/** Lo que tarda la animacion de cierre del Modal. */
+const ESPERA_CIERRE_MS = 350;
+
 export interface Accion {
   texto: string;
   icono: keyof typeof Ionicons.glyphMap;
@@ -42,7 +45,9 @@ export function SheetAcciones({
               style={({ pressed }) => [estilos.opcion, pressed && estilos.opcionPresionada]}
               onPress={() => {
                 onCerrar();
-                a.onPress();
+                // La accion corre cuando el sheet ya se fue: en iOS, abrir otro
+                // Modal mientras este se cierra deja al segundo sin mostrarse.
+                setTimeout(a.onPress, ESPERA_CIERRE_MS);
               }}
             >
               <Ionicons name={a.icono} size={sizes.iconSmall} color={colors.action} />

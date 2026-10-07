@@ -7,6 +7,10 @@
 //
 // Un item pesado en el otro estado (estado_carga) se muestra con lo que se
 // peso de verdad, "300 g crudo", y no con los gramos convertidos.
+//
+// Los items que salieron de una receta se agrupan bajo "Tarta · 1 porción",
+// desplegable. El nombre es el guardado en el item: si la receta se borro o
+// se renombro, se sigue viendo lo que se comio. Ver src/lib/recetas.ts.
 
 import { useState, useCallback } from 'react';
 import {
@@ -37,6 +41,11 @@ import type { ComidaRow, PorcionTipica } from '@/db/schema';
 import { obtenerAlimento } from '@/db/queries/alimentos';
 import { borrarFotoComida, fotoDisponible } from '@/features/foto/archivo';
 import { FotoDetalleComida } from '@/features/foto/components/FotoComida';
+import { SheetGuardarReceta } from '@/features/comidas/components/SheetGuardarReceta';
+import { guardarComidaComoReceta } from '@/db/queries/recetas';
+import { agruparPorReceta, textoPorciones } from '@/lib/recetas';
+import { Toast } from '@/ui/Toast';
+import { Ionicons } from '@expo/vector-icons';
 
 function capitalizar(texto: string): string {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
@@ -116,6 +125,10 @@ export default function DetalleComida() {
   const [items, setItems] = useState<ItemConPorciones[]>([]);
   const [cargando, setCargando] = useState(true);
   const [editando, setEditando] = useState<ItemConPorciones | null>(null);
+  // Grupos de receta abiertos, por receta_grupo
+  const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
+  const [guardandoReceta, setGuardandoReceta] = useState(false);
+  const [aviso, setAviso] = useState<{ texto: string; clave: number } | null>(null);
 
   /**
    * Recarga todo desde la base.
@@ -208,6 +221,26 @@ export default function DetalleComida() {
     ]);
   };
 
+  const guardarComoReceta = async (nombre: string) => {
+    if (!comida) return;
+    setGuardandoReceta(false);
+    try {
+      await guardarComidaComoReceta({ comidaId: comida.id, usuarioId: comida.usuario_id, nombre });
+      setAviso({ texto: 'Receta guardada', clave: Date.now() });
+    } catch (e) {
+      console.error('Error al guardar la receta:', e);
+      Alert.alert('Error', 'No se pudo guardar la receta.');
+    }
+  };
+
+  const alternarGrupo = (grupo: string) =>
+    setAbiertos((prev) => {
+      const nuevo = new Set(prev);
+      if (nuevo.has(grupo)) nuevo.delete(grupo);
+      else nuevo.add(grupo);
+      return nuevo;
+    });
+
   const datosSheet: DatosSheet | null = editando && {
     nombre: editando.alimento_nombre,
     kcal_por_100g: editando.kcal_por_100g,
@@ -242,7 +275,47 @@ export default function DetalleComida() {
     );
   }
 
+  const renderItem = (item: ItemConPorciones) => {
+    const f = item.cantidad_g / 100;
+    const kcal = item.kcal_por_100g * f;
+    const prot = item.proteina_g * f;
+    const carb = item.carbohidratos_g * f;
+    const grasa = item.grasa_g * f;
+
+    return (
+      <Pressable
+        key={item.id}
+        style={({ pressed }) => [
+          estilos.card,
+          pressed && estilos.cardPresionada,
+        ]}
+        onPress={() => setEditando(item)}
+      >
+        <View>
+          <Text style={estilos.alimentoNombre}>{item.alimento_nombre}</Text>
+          <Text style={estilos.alimentoPorcion}>
+            {item.estado_carga && item.cantidad_ingresada_g
+              ? textoCantidadIngresada(item.cantidad_ingresada_g, item.estado_carga, item.estado_base)
+              : etiquetaCantidad(item.porciones, item.cantidad_g)}
+          </Text>
+        </View>
+
+        <View style={estilos.caloriasFila}>
+          <Text style={estilos.caloriasValor}>{Math.round(kcal)}</Text>
+          <Text style={estilos.caloriasUnidad}> kcal</Text>
+        </View>
+
+        <DesgloseMacros
+          proteina={prot}
+          carbohidratos={carb}
+          grasa={grasa}
+        />
+      </Pressable>
+    );
+  };
+
   return (
+    <View style={estilos.flex}>
     <Pantalla>
       <View style={estilos.header}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
@@ -263,45 +336,49 @@ export default function DetalleComida() {
         </View>
       ) : (
         <View style={estilos.lista}>
-          {items.map((item) => {
-            const f = item.cantidad_g / 100;
-            const kcal = item.kcal_por_100g * f;
-            const prot = item.proteina_g * f;
-            const carb = item.carbohidratos_g * f;
-            const grasa = item.grasa_g * f;
-
+          {agruparPorReceta(items).map((b) => {
+            if (b.tipo === 'suelto') return renderItem(b.item);
+            const abierto = abiertos.has(b.grupo);
+            const kcal = b.items.reduce((n, it) => n + (it.kcal_por_100g * it.cantidad_g) / 100, 0);
             return (
-              <Pressable
-                key={item.id}
-                style={({ pressed }) => [
-                  estilos.card,
-                  pressed && estilos.cardPresionada,
-                ]}
-                onPress={() => setEditando(item)}
-              >
-                <View>
-                  <Text style={estilos.alimentoNombre}>{item.alimento_nombre}</Text>
-                  <Text style={estilos.alimentoPorcion}>
-                    {item.estado_carga && item.cantidad_ingresada_g
-                      ? textoCantidadIngresada(item.cantidad_ingresada_g, item.estado_carga, item.estado_base)
-                      : etiquetaCantidad(item.porciones, item.cantidad_g)}
-                  </Text>
-                </View>
-
-                <View style={estilos.caloriasFila}>
-                  <Text style={estilos.caloriasValor}>{Math.round(kcal)}</Text>
-                  <Text style={estilos.caloriasUnidad}> kcal</Text>
-                </View>
-
-                <DesgloseMacros
-                  proteina={prot}
-                  carbohidratos={carb}
-                  grasa={grasa}
-                />
-              </Pressable>
+              <View key={b.grupo} style={estilos.grupo}>
+                <Pressable
+                  style={({ pressed }) => [estilos.card, pressed && estilos.cardPresionada]}
+                  onPress={() => alternarGrupo(b.grupo)}
+                  accessibilityState={{ expanded: abierto }}
+                >
+                  <View style={estilos.grupoCabecera}>
+                    <View style={estilos.flex}>
+                      <Text style={estilos.alimentoNombre}>
+                        {b.nombre} · {textoPorciones(b.porciones)}
+                      </Text>
+                      <Text style={estilos.alimentoPorcion}>
+                        {b.items.length} {b.items.length === 1 ? 'ingrediente' : 'ingredientes'}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name={abierto ? 'chevron-up' : 'chevron-down'}
+                      size={20}
+                      color={colors.textSecondary}
+                    />
+                  </View>
+                  <View style={estilos.caloriasFila}>
+                    <Text style={estilos.caloriasValor}>{Math.round(kcal)}</Text>
+                    <Text style={estilos.caloriasUnidad}> kcal</Text>
+                  </View>
+                </Pressable>
+                {abierto && <View style={estilos.grupoItems}>{b.items.map(renderItem)}</View>}
+              </View>
             );
           })}
         </View>
+      )}
+
+      {items.length > 0 && (
+        <Pressable style={estilos.guardarReceta} onPress={() => setGuardandoReceta(true)}>
+          <Ionicons name="bookmark-outline" size={18} color={colors.action} />
+          <Text style={estilos.guardarRecetaTexto}>Guardar como receta</Text>
+        </Pressable>
       )}
 
       <Pressable style={estilos.borrar} onPress={borrarComida}>
@@ -313,7 +390,16 @@ export default function DetalleComida() {
         onCerrar={() => setEditando(null)}
         onConfirmar={cambiarCantidad}
       />
+
+      <SheetGuardarReceta
+        visible={guardandoReceta}
+        onCerrar={() => setGuardandoReceta(false)}
+        onGuardar={(nombre) => void guardarComoReceta(nombre)}
+      />
     </Pantalla>
+
+    <Toast mensaje={aviso?.texto ?? null} clave={aviso?.clave} onOculto={() => setAviso(null)} />
+    </View>
   );
 }
 
@@ -344,6 +430,25 @@ const estilos = StyleSheet.create({
     ...shadow.card,
   },
   cardPresionada: { opacity: 0.7 },
+
+  // Grupo de una receta: cabecera desplegable y sus ingredientes debajo
+  grupo: { gap: spacing.sm },
+  grupoCabecera: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  grupoItems: {
+    gap: spacing.sm,
+    paddingLeft: spacing.md,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.border,
+    marginLeft: spacing.sm,
+  },
+  guardarReceta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+  },
+  guardarRecetaTexto: { fontSize: fontSize.body, fontWeight: fontWeight.medium, color: colors.action },
 
   alimentoNombre: {
     fontSize: fontSize.body,

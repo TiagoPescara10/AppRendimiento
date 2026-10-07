@@ -14,6 +14,9 @@ import { colors, fontSize, fontWeight, lineHeight, sizes, spacing } from '@/ui/t
 import { obtenerPerfilLocal } from '@/db/queries/perfil';
 import { HistorialComidas } from '@/features/comidas/components/HistorialComidas';
 import { RecetasGuardadas } from '@/features/comidas/components/RecetasGuardadas';
+import { SheetGuardarReceta } from '@/features/comidas/components/SheetGuardarReceta';
+import { guardarComidaComoReceta } from '@/db/queries/recetas';
+import type { ComidaHistorial } from '@/db/queries/comidas';
 
 type Pestana = 'historial' | 'guardadas';
 const PESTANAS: { valor: Pestana; label: string }[] = [
@@ -26,6 +29,8 @@ export default function MisComidas() {
   const [usuarioId, setUsuarioId] = useState<string | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; clave: number } | null>(null);
   const [pestana, setPestana] = useState<Pestana>('historial');
+  // Comida del historial que se esta guardando como receta
+  const [aReceta, setAReceta] = useState<ComidaHistorial | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -36,6 +41,19 @@ export default function MisComidas() {
   );
 
   const avisar = (texto: string) => setAviso({ texto, clave: Date.now() });
+
+  const guardarComoReceta = async (nombre: string) => {
+    const comida = aReceta;
+    setAReceta(null);
+    if (!comida || !usuarioId) return;
+    try {
+      await guardarComidaComoReceta({ comidaId: comida.id, usuarioId, nombre });
+      avisar('Receta guardada');
+    } catch (e) {
+      console.error('Error al guardar la receta:', e);
+      avisar('No se pudo guardar');
+    }
+  };
 
   return (
     <View style={estilos.flex}>
@@ -74,7 +92,13 @@ export default function MisComidas() {
 
         {usuarioId ? (
           pestana === 'historial' ? (
-            <HistorialComidas usuarioId={usuarioId} onAviso={avisar} />
+            <HistorialComidas
+              usuarioId={usuarioId}
+              onAviso={avisar}
+              accionesExtra={(c) => [
+                { texto: 'Guardar como receta', icono: 'bookmark-outline', onPress: () => setAReceta(c) },
+              ]}
+            />
           ) : (
             <RecetasGuardadas usuarioId={usuarioId} onAviso={avisar} />
           )
@@ -82,6 +106,12 @@ export default function MisComidas() {
           <ActivityIndicator color={colors.action} />
         )}
       </Pantalla>
+
+      <SheetGuardarReceta
+        visible={aReceta !== null}
+        onCerrar={() => setAReceta(null)}
+        onGuardar={(nombre) => void guardarComoReceta(nombre)}
+      />
 
       <Toast mensaje={aviso?.texto ?? null} clave={aviso?.clave} onOculto={() => setAviso(null)} />
     </View>
