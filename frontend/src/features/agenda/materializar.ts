@@ -25,12 +25,14 @@ import {
   listarRutinas,
 } from '../../db/queries/rutinas';
 import {
+  copiarRutinaPredefinidaSinTransaccion,
   desactivarRutinaGimnasio,
 } from '../../db/queries/rutinasGimnasio';
 import { getDb } from '../../db/schema';
 import type { Intensidad, TipoEvento } from '../../db/schema';
 import { randomUUID } from '../../db/sync/uuid';
 import { aFechaLocal, aISOLocal } from '../../lib/fechas';
+import type { DestinoRutina, PlanSemana } from '../entrenamiento/miSemana';
 
 /**
  * ISO 8601 con offset local a partir de un dia y un "HH:MM".
@@ -225,6 +227,22 @@ export async function programarRutinaSemanal(
   return { creadas, actualizadas };
 }
 
+/** El instante desde el que una ocurrencia cuenta como futura: hoy, al minuto. */
+function corteFuturo(hoy: Date): string {
+  const alMinuto = new Date(hoy);
+  alMinuto.setSeconds(0, 0);
+  return aISOLocal(alMinuto);
+}
+
+/**
+ * Apaga la rutina y borra sus ocurrencias desde `corte`; las pasadas quedan.
+ * Sin transaccion propia: la ponen desactivarRutina() y guardarMiSemana().
+ */
+async function apagarRutinaYLimpiar(rutinaId: string, corte: string): Promise<number> {
+  await actualizarRutina(rutinaId, { activa: false });
+  return eliminarEventosFuturosDeRutina(rutinaId, corte);
+}
+
 /**
  * Apaga la rutina y limpia sus ocurrencias futuras. Devuelve cuantas borro.
  */
@@ -232,17 +250,79 @@ export async function desactivarRutina(
   rutinaId: string,
   hoy: Date = new Date(),
 ): Promise<number> {
-  const alMinuto = new Date(hoy);
-  alMinuto.setSeconds(0, 0);
-  const corte = aISOLocal(alMinuto);
+  const corte = corteFuturo(hoy);
 
   let borrados = 0;
   await getDb().withTransactionAsync(async () => {
-    await actualizarRutina(rutinaId, { activa: false });
-    borrados = await eliminarEventosFuturosDeRutina(rutinaId, corte);
+    borrados = await apagarRutinaYLimpiar(rutinaId, corte);
   });
 
   return borrados;
+}
+
+/**
+ * Escribe el plan del asistente Mi semana (features/entrenamiento/miSemana.ts)
+ * en una sola transaccion y despues materializa:
+ *   1. copia cada predefinida del plan a Mis rutinas, una vez;
+ *   2. desactiva las filas que sobran, borrando sus ocurrencias futuras y
+ *      nunca las pasadas (lo mismo que desactivarRutina). Va antes que las
+ *      altas: asi un dia nunca tiene dos filas activas con la misma rutina,
+ *      que el indice unico de la migracion 015 rechazaria;
+ *   3. actualiza las filas que cambiaron y borra sus ocurrencias futuras,
+ *      que materializarRutinas vuelve a crear con la hora y la rutina nuevas;
+ *   4. crea las filas nuevas.
+ *
+ * Con un plan sin cambios no escribe nada. Devuelve cuantas rutinas copio.
+ */
+export async function guardarMiSemana(
+  usuarioId: string,
+  plan: PlanSemana,
+  hoy: Date = new Date(),
+): Promise<{ copiadas: number }> {
+  if (plan.sinCambios) return { copiadas: 0 };
+  const corte = corteFuturo(hoy);
+
+  await getDb().withTransactionAsync(async () => {
+    const copias = new Map<string, string>();
+    for (const predefinidaId of plan.copiar) {
+      copias.set(predefinidaId, await copiarRutinaPredefinidaSinTransaccion(predefinidaId, usuarioId));
+    }
+    const resolver = (destino: DestinoRutina): string => {
+      if (destino.tipo === 'existente') return destino.id;
+      const id = copias.get(destino.predefinidaId);
+      if (!id) throw new Error(`El plan usa una predefinida sin copiar: ${destino.predefinidaId}`);
+      return id;
+    };
+
+    for (const id of plan.desactivar) {
+      await apagarRutinaYLimpiar(id, corte);
+    }
+
+    for (const a of plan.actualizar) {
+      await actualizarRutina(a.id, {
+        hora: a.hora,
+        duracion_estimada_min: a.duracion_estimada_min,
+        rutina_gimnasio_id: resolver(a.rutina),
+      });
+      await eliminarEventosFuturosDeRutina(a.id, corte);
+    }
+
+    for (const c of plan.crear) {
+      await crearRutina({
+        id: randomUUID(),
+        usuario_id: usuarioId,
+        dia_semana: c.dia_semana,
+        hora: c.hora,
+        tipo: 'gimnasio',
+        duracion_estimada_min: c.duracion_estimada_min,
+        intensidad: 'media',
+        rutina_gimnasio_id: resolver(c.rutina),
+      });
+    }
+  });
+
+  await materializarRutinas(usuarioId, 8, hoy);
+  return { copiadas: plan.copiar.length };
 }
 
 /**
@@ -252,9 +332,7 @@ export async function desactivarRutinaGimnasioYLimpiar(
   rutinaGimnasioId: string,
   hoy: Date = new Date(),
 ): Promise<number> {
-  const alMinuto = new Date(hoy);
-  alMinuto.setSeconds(0, 0);
-  const corte = aISOLocal(alMinuto);
+  const corte = corteFuturo(hoy);
 
   let borrados = 0;
   await getDb().withTransactionAsync(async () => {

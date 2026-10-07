@@ -61,6 +61,8 @@ writeFileSync(
       // import de guardarSesion.ts, y es puro.
       join(RAIZ, 'src/features/entrenamiento/guardarSesion.ts'),
       join(RAIZ, 'src/features/entrenamiento/guardarRutina.ts'),
+      // Puro: el diff del asistente Mi semana que guarda guardarMiSemana().
+      join(RAIZ, 'src/features/entrenamiento/miSemana.ts'),
       join(RAIZ, 'src/features/comidas/porciones.ts'),
       // Puro: la conversion que usan las pantallas para armar cantidad_g.
       join(RAIZ, 'src/lib/coccion.ts'),
@@ -163,6 +165,7 @@ const semillaCoccion = req('./db/seeds/coccion.js');
 const coccion = req('./lib/coccion.js');
 const qRecetas = req('./db/queries/recetas.js');
 const libRecetas = req('./lib/recetas.js');
+const miSemana = req('./features/entrenamiento/miSemana.js');
 
 // El ciclo de imports se manifiesta aca: si schema -> migrations -> 00N -> schema,
 // el literal queda congelado en undefined al construirse el objeto.
@@ -3584,6 +3587,142 @@ await prueba('guardar como receta deja la comida marcada; borrar la receta la de
   await qRecetas.borrarReceta(r.id);
   igual((await qComidas.obtenerComida('co-m')).receta_guardada_id, null, 'borrada la receta, se desmarca');
   igual((await qComidas.listarItems('co-m')).length, 1, 'la comida sigue con sus items');
+  await schema.cerrarDb();
+});
+
+// --- Mi semana (guardarMiSemana) -------------------------------------------
+//
+// El asistente arma un plan puro (miSemana.ts, probado en probar-mi-semana) y
+// guardarMiSemana() lo escribe en una sola transaccion. Aca se prueba contra la
+// base real: copias, filas de rutina, ocurrencias y que todo o nada.
+
+async function baseSemana(archivo) {
+  await schema.initDb(join(tmp, archivo));
+  await qPerfil.crearPerfil({ id: 'u-s', fecha_alta: '2026-09-01T10:00:00-03:00' });
+}
+
+/** Precarga como el asistente: filas activas, Mis rutinas y la biblioteca. */
+async function contextoSemana() {
+  const filas = await qRutinas.listarRutinas('u-s', true);
+  const propias = (await qRutinasGimnasio.listarRutinasGimnasio('u-s', true)).map((r) => ({ id: r.id, nombre: r.nombre }));
+  const predefinidas = (await qRutinasGimnasio.listarRutinasPredefinidas()).map((r) => ({ id: r.id, nombre: r.nombre }));
+  return { filas, ctx: { propias, predefinidas } };
+}
+
+function estadoSugerido(dias) {
+  const s = miSemana.sugerirRutinas(dias);
+  return {
+    ...miSemana.estadoVacio(),
+    dias: miSemana.ordenarDias(dias),
+    rutinaPorDia: Object.fromEntries(
+      Object.entries(s.porDia).map(([d, id]) => [d, { origen: 'predefinida', id }]),
+    ),
+  };
+}
+
+const contar = async (sql, args = []) => (await schema.getDb().getFirstAsync(sql, args)).n;
+
+await prueba('las predefinidas que sugiere Mi semana existen en la semilla', async () => {
+  const ids = new Set(rutinasBase.RUTINAS_PREDEFINIDAS_BASE.map((r) => r.id));
+  for (const id of Object.values(miSemana.PREDEF)) {
+    if (!ids.has(id)) throw new Error(`no existe ${id}`);
+  }
+});
+
+await prueba('guardarMiSemana() semana nueva de 6 dias: una copia por predefinida y una fila por dia', async () => {
+  await baseSemana('mi-semana-nueva.db');
+  const { filas, ctx } = await contextoSemana();
+  const plan = miSemana.planDesdeAsistente(estadoSugerido([1, 2, 3, 4, 5, 6]), filas, ctx);
+  const r = await agenda.guardarMiSemana('u-s', plan, HOY);
+  igual(r.copiadas, 3, 'copias');
+
+  const nombres = (await qRutinasGimnasio.listarRutinasGimnasio('u-s', true)).map((x) => x.nombre).sort();
+  igual(nombres.join(','), 'Legs,Pull,Push', 'Mis rutinas sin duplicados');
+
+  const activas = await qRutinas.listarRutinas('u-s', true);
+  igual(activas.length, 6, 'filas activas');
+  igual(activas.every((f) => f.tipo === 'gimnasio' && f.hora === '19:00' && f.duracion_estimada_min === 60), true, 'tipo, hora y duracion');
+  const push = activas.filter((f) => f.dia_semana === 1)[0].rutina_gimnasio_id;
+  igual(activas.filter((f) => f.dia_semana === 4)[0].rutina_gimnasio_id, push, 'lunes y jueves comparten la copia de Push');
+
+  igual(await contar('SELECT count(*) AS n FROM evento WHERE usuario_id = ?', ['u-s']) > 0, true, 'materializo eventos');
+  await schema.cerrarDb();
+});
+
+await prueba('guardarMiSemana() editar sin cambios no escribe nada, y repetir la sugerencia no copia de nuevo', async () => {
+  await baseSemana('mi-semana-igual.db');
+  let { filas, ctx } = await contextoSemana();
+  await agenda.guardarMiSemana('u-s', miSemana.planDesdeAsistente(estadoSugerido([1, 3, 5]), filas, ctx), HOY);
+
+  ({ filas, ctx } = await contextoSemana());
+  const antes = await contar("SELECT count(*) AS n FROM rutina WHERE usuario_id = 'u-s'");
+  const plan = miSemana.planDesdeAsistente(miSemana.estadoDesdeRutinas(filas), filas, ctx);
+  igual(plan.sinCambios, true, 'precargar y guardar');
+
+  const otraVez = miSemana.planDesdeAsistente(estadoSugerido([1, 3, 5]), filas, ctx);
+  igual(otraVez.sinCambios, true, 'la misma sugerencia reutiliza la copia de Full body');
+  await agenda.guardarMiSemana('u-s', otraVez, HOY);
+  igual(await contar("SELECT count(*) AS n FROM rutina WHERE usuario_id = 'u-s'"), antes, 'mismas filas');
+  igual(await contar("SELECT count(*) AS n FROM rutina_gimnasio WHERE usuario_id = 'u-s'"), 1, 'una sola Full body');
+  await schema.cerrarDb();
+});
+
+await prueba('guardarMiSemana() sacar un dia: desactiva la fila y borra lo futuro, no lo pasado', async () => {
+  await baseSemana('mi-semana-sacar.db');
+  let { filas, ctx } = await contextoSemana();
+  await agenda.guardarMiSemana('u-s', miSemana.planDesdeAsistente(estadoSugerido([1, 3, 5]), filas, ctx), HOY);
+
+  ({ filas, ctx } = await contextoSemana());
+  const miercoles = filas.find((f) => f.dia_semana === 3);
+  // Una ocurrencia pasada del miercoles, ya hecha: es historial.
+  await qEventos.crearEvento({
+    id: 'ev-s-pasado', usuario_id: 'u-s', tipo: 'gimnasio',
+    fecha_hora_inicio: '2026-09-02T19:00:00-03:00', intensidad: 'media',
+    rutina_id: miercoles.id, completado: true, respondido: true,
+  });
+
+  const e = miSemana.estadoDesdeRutinas(filas);
+  e.dias = [1, 5];
+  delete e.rutinaPorDia[3];
+  const plan = miSemana.planDesdeAsistente(e, filas, ctx);
+  igual(plan.desactivar.join(), miercoles.id, 'desactiva solo el miercoles');
+  await agenda.guardarMiSemana('u-s', plan, HOY);
+
+  igual((await qRutinas.obtenerRutina(miercoles.id)).activa, 0, 'fila inactiva');
+  igual(await contar('SELECT count(*) AS n FROM evento WHERE rutina_id = ? AND fecha_hora_inicio >= ?', [miercoles.id, '2026-09-04']), 0, 'sin ocurrencias futuras');
+  igual(await contar("SELECT count(*) AS n FROM evento WHERE id = 'ev-s-pasado'"), 1, 'la pasada sigue');
+  igual((await qRutinas.listarRutinas('u-s', true)).length, 2, 'quedan lunes y viernes');
+  await schema.cerrarDb();
+});
+
+await prueba('guardarMiSemana() cambiar la hora de todos regenera las ocurrencias a la hora nueva', async () => {
+  await baseSemana('mi-semana-hora.db');
+  let { filas, ctx } = await contextoSemana();
+  await agenda.guardarMiSemana('u-s', miSemana.planDesdeAsistente(estadoSugerido([1, 3, 5]), filas, ctx), HOY);
+
+  ({ filas, ctx } = await contextoSemana());
+  const plan = miSemana.planDesdeAsistente({ ...miSemana.estadoDesdeRutinas(filas), horaUnica: '07:30' }, filas, ctx);
+  igual(plan.actualizar.length, 3, 'actualiza las tres');
+  await agenda.guardarMiSemana('u-s', plan, HOY);
+
+  const horas = await schema.getDb().getAllAsync(
+    "SELECT DISTINCT substr(fecha_hora_inicio, 12, 5) AS h FROM evento WHERE usuario_id = 'u-s'",
+  );
+  igual(horas.map((x) => x.h).join(','), '07:30', 'todas las ocurrencias a las 07:30');
+  igual((await qRutinas.listarRutinas('u-s', true)).length, 3, 'siguen 3 filas');
+  await schema.cerrarDb();
+});
+
+await prueba('guardarMiSemana() es todo o nada: si algo falla no queda ninguna copia ni fila', async () => {
+  await baseSemana('mi-semana-falla.db');
+  const plan = {
+    copiar: ['predef-push', 'predef-no-existe'],
+    crear: [{ dia_semana: 1, hora: '19:00', duracion_estimada_min: 60, rutina: { tipo: 'copia', predefinidaId: 'predef-push' } }],
+    actualizar: [], desactivar: [], sinCambios: false,
+  };
+  await lanza(() => agenda.guardarMiSemana('u-s', plan, HOY), /No existe la rutina predefinida/, 'guardar');
+  igual(await contar("SELECT count(*) AS n FROM rutina_gimnasio WHERE usuario_id = 'u-s'"), 0, 'sin copias');
+  igual(await contar("SELECT count(*) AS n FROM rutina WHERE usuario_id = 'u-s'"), 0, 'sin filas');
   await schema.cerrarDb();
 });
 

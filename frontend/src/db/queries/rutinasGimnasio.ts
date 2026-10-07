@@ -138,29 +138,35 @@ async function insertarEjerciciosRutina(
   }
 }
 
+/**
+ * La rutina y sus ejercicios, SIN transaccion propia: es para llamarla desde
+ * adentro de otra (expo-sqlite no anida withTransactionAsync). Afuera de una
+ * transaccion, usar crearRutinaGimnasio().
+ */
+async function insertarRutinaGimnasio(datos: NuevaRutinaGimnasio): Promise<void> {
+  const t = ahora();
+  await getDb().runAsync(
+    `INSERT INTO rutina_gimnasio
+       (id, usuario_id, nombre, activa, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      datos.id,
+      datos.usuario_id,
+      datos.nombre.trim(),
+      datos.activa === false ? 0 : 1,
+      t,
+      t,
+    ],
+  );
+
+  await insertarEjerciciosRutina(datos.id, datos.ejercicio_ids, datos.calentamiento_ids ?? [], t);
+}
+
 export async function crearRutinaGimnasio(
   datos: NuevaRutinaGimnasio,
 ): Promise<RutinaGimnasioConDetalle> {
-  const t = ahora();
   const db = getDb();
-
-  await db.withTransactionAsync(async () => {
-    await db.runAsync(
-      `INSERT INTO rutina_gimnasio
-         (id, usuario_id, nombre, activa, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        datos.id,
-        datos.usuario_id,
-        datos.nombre.trim(),
-        datos.activa === false ? 0 : 1,
-        t,
-        t,
-      ],
-    );
-
-    await insertarEjerciciosRutina(datos.id, datos.ejercicio_ids, datos.calentamiento_ids ?? [], t);
-  });
+  await db.withTransactionAsync(() => insertarRutinaGimnasio(datos));
 
   const res = await obtenerRutinaGimnasio(datos.id);
   if (!res) throw new Error(`No se pudo leer la rutina de gimnasio creada: ${datos.id}`);
@@ -367,15 +373,35 @@ export async function copiarRutinaPredefinida(
   rutinaPredefinidaId: string,
   usuarioId: string,
 ): Promise<RutinaGimnasioConDetalle> {
+  const datos = await datosCopiaPredefinida(rutinaPredefinidaId, usuarioId);
+  return crearRutinaGimnasio(datos);
+}
+
+/**
+ * Igual que copiarRutinaPredefinida() pero sin transaccion propia, para
+ * copiar dentro de otra (el guardado de Mi semana). Devuelve el id de la copia.
+ */
+export async function copiarRutinaPredefinidaSinTransaccion(
+  rutinaPredefinidaId: string,
+  usuarioId: string,
+): Promise<string> {
+  const datos = await datosCopiaPredefinida(rutinaPredefinidaId, usuarioId);
+  await insertarRutinaGimnasio(datos);
+  return datos.id;
+}
+
+async function datosCopiaPredefinida(
+  rutinaPredefinidaId: string,
+  usuarioId: string,
+): Promise<NuevaRutinaGimnasio> {
   const original = await obtenerRutinaPredefinida(rutinaPredefinidaId);
   if (!original) {
     throw new Error(`No existe la rutina predefinida: ${rutinaPredefinidaId}`);
   }
-
-  return crearRutinaGimnasio({
+  return {
     id: randomUUID(),
     usuario_id: usuarioId,
     nombre: original.nombre,
     ejercicio_ids: original.ejercicios.map((e) => e.id),
-  });
+  };
 }
