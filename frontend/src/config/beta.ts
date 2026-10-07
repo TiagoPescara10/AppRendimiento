@@ -8,7 +8,8 @@
 //   - planes.tsx no se alcanza por ninguna navegacion y, si alguien llega
 //     igual, redirige a la app;
 //   - Perfil oculta "Suscripcion" y "Cerrar sesion" (este ultimo lleva a un
-//     login de mentira que acepta cualquier cosa y solo confunde).
+//     login de mentira que acepta cualquier cosa y solo confunde), y tambien
+//     "Ayuda y soporte", que todavia no lleva a ningun lado.
 //
 // Para volver al flujo con planes, pasarlo a false. No hay que tocar nada mas.
 

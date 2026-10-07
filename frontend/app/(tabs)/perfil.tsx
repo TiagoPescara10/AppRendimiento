@@ -488,19 +488,10 @@ export default function Perfil() {
         )}
       </View>
 
-      {/* Bloque e: Ayuda y cerrar sesion (este ultimo, fuera de la beta) */}
+      {/* Bloque e: Privacidad, Ayuda y cerrar sesion (estos dos, fuera de la beta) */}
       <View style={estilos.card}>
-        <Pressable style={estilos.opcionFila}>
-          <View style={estilos.opcionIzquierda}>
-            <Ionicons name="help-circle-outline" size={sizes.iconSmall} color={colors.textSecondary} />
-            <Text style={estilos.opcionTexto}>Ayuda y soporte</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-        </Pressable>
-
-        <View style={estilos.separador} />
-
-        {/* Privacidad */}
+        {/* Privacidad va primero: es la unica fila fija, y asi las opcionales
+            de abajo pueden traer su separador arriba */}
         <Pressable style={estilos.opcionFila} onPress={() => router.push('/perfil/privacidad')}>
           <View style={estilos.opcionIzquierda}>
             <Ionicons name="lock-closed-outline" size={sizes.iconSmall} color={colors.textSecondary} />
@@ -508,6 +499,20 @@ export default function Perfil() {
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </Pressable>
+
+        {/* Ayuda y soporte. Oculta en beta: todavia no hay a donde llevar (src/config/beta.ts). */}
+        {!MODO_BETA && (
+          <>
+            <View style={estilos.separador} />
+            <Pressable style={estilos.opcionFila}>
+              <View style={estilos.opcionIzquierda}>
+                <Ionicons name="help-circle-outline" size={sizes.iconSmall} color={colors.textSecondary} />
+                <Text style={estilos.opcionTexto}>Ayuda y soporte</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            </Pressable>
+          </>
+        )}
 
         {/* Cada fila opcional trae su separador ARRIBA: asi, si se oculta, no
             queda una linea suelta al pie de la card. */}
