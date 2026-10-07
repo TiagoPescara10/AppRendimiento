@@ -8,7 +8,7 @@ import type * as SQLite from 'expo-sqlite';
 import { escribirMeta, leerMeta } from '../meta';
 import { randomUUID } from '../sync/uuid';
 import type { EjercicioSemilla } from './ejercicios-base';
-import { EJERCICIOS_BASE } from './ejercicios-base';
+import { EJERCICIOS_BASE, EJERCICIOS_CALENTAMIENTO } from './ejercicios-base';
 
 const CLAVE_SEMILLA = 'semilla_ejercicios';
 
@@ -19,6 +19,7 @@ interface LoteSemillaEjercicios {
 
 const LOTES: LoteSemillaEjercicios[] = [
   { version: 1, ejercicios: EJERCICIOS_BASE },
+  { version: 2, ejercicios: EJERCICIOS_CALENTAMIENTO },
 ];
 
 export const VERSION_SEMILLA_EJERCICIOS: number = LOTES.reduce(
@@ -28,8 +29,8 @@ export const VERSION_SEMILLA_EJERCICIOS: number = LOTES.reduce(
 
 const SQL_INSERT = `
 INSERT INTO ejercicio
-  (id, nombre, grupo, created_at, updated_at)
-SELECT ?, ?, ?, ?, ?
+  (id, nombre, grupo, medida, created_at, updated_at)
+SELECT ?, ?, ?, ?, ?, ?
 WHERE NOT EXISTS (SELECT 1 FROM ejercicio WHERE nombre = ?)
 `;
 
@@ -55,6 +56,7 @@ export async function sembrarEjercicios(db: SQLite.SQLiteDatabase): Promise<numb
             randomUUID(),
             e.nombre,
             e.grupo,
+            e.medida ?? 'repeticiones',
             t,
             t,
             e.nombre,

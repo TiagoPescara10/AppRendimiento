@@ -2,12 +2,18 @@
 //
 // Catalogo base de 74 ejercicios comunes para la semilla inicial (lote 1).
 // Nombres genericos, sin marcas ni maquinas propietarias de ningun gimnasio.
+//
+// medida es 'repeticiones' salvo que se diga otra cosa. Los que van por tiempo
+// tambien los pasa a 'tiempo' la migracion 021 en las bases ya sembradas: si
+// se suma uno aca, hay que sumarlo alla en una migracion nueva.
 
-import type { GrupoMuscular } from '../schema';
+import type { GrupoMuscular, MedidaEjercicio } from '../schema';
 
 export interface EjercicioSemilla {
   nombre: string;
   grupo: GrupoMuscular;
+  /** Si falta, 'repeticiones'. */
+  medida?: MedidaEjercicio;
 }
 
 export const EJERCICIOS_BASE: EjercicioSemilla[] = [
@@ -82,20 +88,32 @@ export const EJERCICIOS_BASE: EjercicioSemilla[] = [
   { nombre: 'Extension de munecas con barra', grupo: 'brazos' },
 
   // Core (8)
-  { nombre: 'Plancha isometrica', grupo: 'core' },
-  { nombre: 'Plancha lateral', grupo: 'core' },
+  { nombre: 'Plancha isometrica', grupo: 'core', medida: 'tiempo' },
+  { nombre: 'Plancha lateral', grupo: 'core', medida: 'tiempo' },
   { nombre: 'Crunch abdominal en suelo', grupo: 'core' },
   { nombre: 'Crunch en polea alta', grupo: 'core' },
   { nombre: 'Elevacion de piernas colgado', grupo: 'core' },
   { nombre: 'Rueda abdominal', grupo: 'core' },
   { nombre: 'Giros rusos', grupo: 'core' },
-  { nombre: 'Vacio abdominal', grupo: 'core' },
+  { nombre: 'Vacio abdominal', grupo: 'core', medida: 'tiempo' },
 
   // Cardio (6)
-  { nombre: 'Cinta de correr', grupo: 'cardio' },
-  { nombre: 'Bicicleta fija', grupo: 'cardio' },
-  { nombre: 'Eliptico', grupo: 'cardio' },
-  { nombre: 'Remo ergometro', grupo: 'cardio' },
-  { nombre: 'Salto a la soga', grupo: 'cardio' },
-  { nombre: 'Escalador', grupo: 'cardio' },
+  { nombre: 'Cinta de correr', grupo: 'cardio', medida: 'tiempo' },
+  { nombre: 'Bicicleta fija', grupo: 'cardio', medida: 'tiempo' },
+  { nombre: 'Eliptico', grupo: 'cardio', medida: 'tiempo' },
+  { nombre: 'Remo ergometro', grupo: 'cardio', medida: 'tiempo' },
+  { nombre: 'Salto a la soga', grupo: 'cardio', medida: 'tiempo' },
+  { nombre: 'Escalador', grupo: 'cardio', medida: 'tiempo' },
+];
+
+/**
+ * Lote 2: ejercicios tipicos de calentamiento. Movilidad articular general va
+ * en cardio porque no hay un grupo que le quede mejor, y sumar uno obligaria a
+ * recrear la tabla ejercicio (ver migracion 021).
+ */
+export const EJERCICIOS_CALENTAMIENTO: EjercicioSemilla[] = [
+  { nombre: 'Movilidad articular general', grupo: 'cardio', medida: 'tiempo' },
+  { nombre: 'Saltos de tijera', grupo: 'cardio', medida: 'tiempo' },
+  { nombre: 'Rotaciones de hombros con banda', grupo: 'hombros' },
+  { nombre: 'Sentadilla con peso corporal', grupo: 'piernas' },
 ];

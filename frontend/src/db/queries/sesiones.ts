@@ -154,31 +154,42 @@ export async function ultimaActividadCronometro(
 // Series (Rutina de gimnasio)
 // ---------------------------------------------------------------------------
 
+/**
+ * Lleva repeticiones o duracion_seg, exactamente una de las dos: la base
+ * rechaza las dos vacias y las dos cargadas.
+ */
 export interface NuevaSerie {
   id: string;
   sesion_id: string;
   ejercicio_id: string;
   orden: number;
-  repeticiones: number;
+  repeticiones?: number | null;
+  duracion_seg?: number | null;
   peso_kg?: number | null;
+  es_calentamiento?: boolean;
+}
+
+const SQL_INSERT_SERIE = `INSERT INTO serie
+  (id, sesion_id, ejercicio_id, orden, repeticiones, duracion_seg, peso_kg, es_calentamiento, created_at, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+function valoresSerie(s: NuevaSerie, t: string): (string | number | null)[] {
+  return [
+    s.id,
+    s.sesion_id,
+    s.ejercicio_id,
+    s.orden,
+    s.repeticiones ?? null,
+    s.duracion_seg ?? null,
+    s.peso_kg ?? null,
+    s.es_calentamiento ? 1 : 0,
+    t,
+    t,
+  ];
 }
 
 export async function agregarSerie(datos: NuevaSerie): Promise<SerieRow> {
-  const t = ahora();
-  await getDb().runAsync(
-    `INSERT INTO serie (id, sesion_id, ejercicio_id, orden, repeticiones, peso_kg, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      datos.id,
-      datos.sesion_id,
-      datos.ejercicio_id,
-      datos.orden,
-      datos.repeticiones,
-      datos.peso_kg ?? null,
-      t,
-      t,
-    ],
-  );
+  await getDb().runAsync(SQL_INSERT_SERIE, valoresSerie(datos, ahora()));
 
   const fila = await getDb().getFirstAsync<SerieRow>(
     'SELECT * FROM serie WHERE id = ?',
@@ -192,11 +203,7 @@ export async function agregarSeries(series: NuevaSerie[]): Promise<void> {
   if (series.length === 0) return;
   const t = ahora();
   for (const s of series) {
-    await getDb().runAsync(
-      `INSERT INTO serie (id, sesion_id, ejercicio_id, orden, repeticiones, peso_kg, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [s.id, s.sesion_id, s.ejercicio_id, s.orden, s.repeticiones, s.peso_kg ?? null, t, t],
-    );
+    await getDb().runAsync(SQL_INSERT_SERIE, valoresSerie(s, t));
   }
 }
 
@@ -424,7 +431,7 @@ export async function listarEjerciciosConHistorial(
 ): Promise<EjercicioRow[]> {
   const db = getDb();
   return db.getAllAsync<EjercicioRow>(
-    `SELECT e.id, e.nombre, e.grupo, e.created_at, e.updated_at
+    `SELECT e.id, e.nombre, e.grupo, e.medida, e.created_at, e.updated_at
      FROM ejercicio e
      JOIN serie s ON s.ejercicio_id = e.id
      JOIN sesion_entrenamiento se ON se.id = s.sesion_id

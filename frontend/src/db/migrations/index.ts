@@ -30,6 +30,7 @@ import { migracion017 } from './017_rutinas_predefinidas';
 import { migracion018 } from './018_coccion';
 import { migracion019 } from './019_gasto_sesion';
 import { migracion020 } from './020_avisos';
+import { migracion021 } from './021_tiempo_y_calentamiento';
 
 export interface Migracion {
   /** Entero creciente, sin huecos. Termina en PRAGMA user_version. */
@@ -60,6 +61,7 @@ export const migraciones: Migracion[] = [
   migracion018,
   migracion019,
   migracion020,
+  migracion021,
 ];
 
 /** Version del esquema que espera este build. */

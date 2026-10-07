@@ -4,7 +4,7 @@
 // Busqueda por nombre, filtrado por grupo muscular y alta manual por el usuario.
 
 import { getDb } from '../schema';
-import type { EjercicioRow, GrupoMuscular } from '../schema';
+import type { EjercicioRow, GrupoMuscular, MedidaEjercicio } from '../schema';
 
 const ahora = (): string => new Date().toISOString();
 
@@ -36,13 +36,15 @@ export interface NuevoEjercicio {
   id: string;
   nombre: string;
   grupo: GrupoMuscular;
+  /** Si falta, 'repeticiones'. */
+  medida?: MedidaEjercicio;
 }
 
 export async function crearEjercicio(datos: NuevoEjercicio): Promise<EjercicioRow> {
   const t = ahora();
   await getDb().runAsync(
-    'INSERT INTO ejercicio (id, nombre, grupo, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    [datos.id, datos.nombre.trim(), datos.grupo, t, t],
+    'INSERT INTO ejercicio (id, nombre, grupo, medida, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    [datos.id, datos.nombre.trim(), datos.grupo, datos.medida ?? 'repeticiones', t, t],
   );
 
   const fila = await obtenerEjercicio(datos.id);

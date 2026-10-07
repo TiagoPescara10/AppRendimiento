@@ -32,10 +32,11 @@ export interface ResumenFuerzaEjercicio {
  * intervencion de la resistencia a la fatiga, y mostrar un numero preciso
  * seria enganoso.
  *
- * Tambien devuelve null si las repeticiones o el peso son menores o iguales a cero.
+ * Tambien devuelve null si las repeticiones o el peso son menores o iguales a
+ * cero, y en las series por tiempo, que no tienen repeticiones.
  */
-export function estimarUnaRM(pesoKg: number | null, repeticiones: number): number | null {
-  if (pesoKg === null || pesoKg <= 0 || repeticiones <= 0) {
+export function estimarUnaRM(pesoKg: number | null, repeticiones: number | null): number | null {
+  if (pesoKg === null || pesoKg <= 0 || repeticiones === null || repeticiones <= 0) {
     return null;
   }
   if (repeticiones > 12) {
@@ -52,7 +53,7 @@ export function estimarUnaRM(pesoKg: number | null, repeticiones: number): numbe
  * Encuentra la serie con mayor carga de trabajo efectiva (peso_kg * repeticiones).
  * No se basa unicamente en el peso absoluto, ya que una serie de 80 kg x 6 representa
  * un volumen de 480 kg, mientras que 100 kg x 1 representa 100 kg.
- * Si ninguna serie tiene peso, devuelve null.
+ * Si ninguna serie tiene peso, devuelve null. Las series por tiempo no entran.
  */
 export function mejorSerieDe(series: SerieRow[]): SerieRow | null {
   let mejor: SerieRow | null = null;
@@ -60,8 +61,9 @@ export function mejorSerieDe(series: SerieRow[]): SerieRow | null {
 
   for (const s of series) {
     const peso = s.peso_kg ?? 0;
-    if (peso <= 0 || s.repeticiones <= 0) continue;
-    const carga = peso * s.repeticiones;
+    const reps = s.repeticiones ?? 0;
+    if (peso <= 0 || reps <= 0) continue;
+    const carga = peso * reps;
     if (carga > maxCarga) {
       maxCarga = carga;
       mejor = s;
@@ -73,14 +75,15 @@ export function mejorSerieDe(series: SerieRow[]): SerieRow | null {
 
 /**
  * Calcula la suma de peso_kg * repeticiones para todas las series,
- * ignorando las series sin peso o de peso corporal.
+ * ignorando las series sin peso, las de peso corporal y las por tiempo.
  */
 export function volumenTotal(series: SerieRow[]): number {
   let total = 0;
   for (const s of series) {
     const peso = s.peso_kg ?? 0;
-    if (peso > 0 && s.repeticiones > 0) {
-      total += peso * s.repeticiones;
+    const reps = s.repeticiones ?? 0;
+    if (peso > 0 && reps > 0) {
+      total += peso * reps;
     }
   }
   return Math.round(total * 10) / 10;

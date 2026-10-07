@@ -40,6 +40,10 @@ export type ModoEntrenamiento = 'pasadas' | 'cronometro' | 'rutina';
 export type ActividadCronometro = 'correr' | 'caminar' | 'bici';
 export type GrupoMuscular = 'pecho' | 'espalda' | 'piernas' | 'hombros' | 'brazos' | 'core' | 'cardio';
 export type CategoriaRutinaPredefinida = 'principiante' | 'split' | 'especifica';
+/** Como se mide un ejercicio: series de repeticiones o series por tiempo. */
+export type MedidaEjercicio = 'repeticiones' | 'tiempo';
+/** En que parte de la rutina va un ejercicio. El calentamiento va primero. */
+export type BloqueRutina = 'calentamiento' | 'principal';
 
 /** SQLite no tiene booleano: se guarda 0/1. */
 export type Bool01 = 0 | 1;
@@ -251,7 +255,9 @@ export interface RutinaGimnasioEjercicioRow {
   id: string;
   rutina_gimnasio_id: string;
   ejercicio_id: string;
+  /** Orden dentro del bloque. */
   orden: number;
+  bloque: BloqueRutina;
   created_at: string;
   updated_at: string;
 }
@@ -311,17 +317,25 @@ export interface EjercicioRow {
   id: string;
   nombre: string;
   grupo: GrupoMuscular;
+  medida: MedidaEjercicio;
   created_at: string;
   updated_at: string;
 }
 
+/**
+ * Una serie tiene repeticiones o duracion_seg, exactamente una de las dos
+ * (CHECK de la migracion 021). peso_kg es opcional en las dos.
+ */
 export interface SerieRow {
   id: string;
   sesion_id: string;
   ejercicio_id: string;
   orden: number;
-  repeticiones: number;
+  repeticiones: number | null;
+  duracion_seg: number | null;
   peso_kg: number | null;
+  /** No cuenta para volumen, 1RM, records ni el resumen de la sesion. */
+  es_calentamiento: Bool01;
   created_at: string;
   updated_at: string;
 }

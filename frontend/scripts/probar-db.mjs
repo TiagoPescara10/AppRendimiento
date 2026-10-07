@@ -153,6 +153,7 @@ const qRutinasGimnasio = req('./db/queries/rutinasGimnasio.js');
 const semillaRutinas = req('./db/seeds/rutinas-predefinidas.js');
 const rutinasBase = req('./db/seeds/rutinas-predefinidas-base.js');
 const ejerciciosBase = req('./db/seeds/ejercicios-base.js');
+const semillaEjercicios = req('./db/seeds/ejercicios.js');
 const formato = req('./features/agenda/formato.js');
 const entrenamiento = req('./features/entrenamiento/guardarSesion.js');
 const guardarRutina = req('./features/entrenamiento/guardarRutina.js');
@@ -2962,6 +2963,170 @@ await prueba('la 020 sobre una base v19: el perfil queda con los avisos activado
     () => db.runAsync("UPDATE perfil SET avisos_antes = 2 WHERE id = 'u-20'"),
     /CHECK/i, '2 no entra');
   await db.runAsync("UPDATE perfil SET avisos_gimnasio = 0 WHERE id = 'u-20'");
+  await db.closeAsync();
+});
+
+// --- ejercicios por tiempo y calentamiento (migracion 021) -----------------
+
+const POR_TIEMPO = [
+  'Plancha isometrica', 'Plancha lateral', 'Vacio abdominal',
+  'Cinta de correr', 'Bicicleta fija', 'Eliptico',
+  'Remo ergometro', 'Salto a la soga', 'Escalador',
+];
+
+/** Base en v20 con el catalogo del lote 1 sembrado a mano y una sesion con series. */
+async function baseV20(archivo) {
+  const db = await sqlite.openDatabaseAsync(join(tmp, archivo));
+  await db.execAsync('PRAGMA foreign_keys = ON;');
+  for (let v = 1; v <= 20; v++) {
+    await db.execAsync(migrations.migraciones.find((mig) => mig.version === v).sql);
+  }
+  await db.execAsync('PRAGMA user_version = 20');
+
+  const t = '2026-09-01T00:00:00.000Z';
+  let i = 0;
+  for (const e of ejerciciosBase.EJERCICIOS_BASE) {
+    await db.runAsync(
+      'INSERT INTO ejercicio (id, nombre, grupo, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+      [`ej-${i++}`, e.nombre, e.grupo, t, t],
+    );
+  }
+  await db.runAsync("INSERT INTO perfil (id, fecha_alta, created_at, updated_at) VALUES ('u-21', '2026-09-01', ?, ?)", [t, t]);
+  await db.runAsync(
+    `INSERT INTO evento (id, usuario_id, tipo, intensidad, fecha_hora_inicio, completado, respondido, modo_entrenamiento, created_at, updated_at)
+     VALUES ('ev-21', 'u-21', 'gimnasio', 'media', '2026-09-01T18:00:00-03:00', 1, 1, 'rutina', ?, ?)`,
+    [t, t],
+  );
+  await db.runAsync(
+    `INSERT INTO sesion_entrenamiento (id, evento_id, modo, duracion_real_seg, created_at, updated_at)
+     VALUES ('se-21', 'ev-21', 'rutina', 3000, ?, ?)`,
+    [t, t],
+  );
+  await db.runAsync(
+    `INSERT INTO serie (id, sesion_id, ejercicio_id, orden, repeticiones, peso_kg, created_at, updated_at)
+     VALUES ('s-21a', 'se-21', 'ej-0', 0, 8, 80, ?, ?), ('s-21b', 'se-21', 'ej-0', 1, 6, 85, ?, ?),
+            ('s-21c', 'se-21', 'ej-8', 2, 15, NULL, ?, ?)`,
+    [t, t, t, t, t, t],
+  );
+  await db.runAsync(
+    `INSERT INTO rutina_gimnasio (id, usuario_id, nombre, created_at, updated_at)
+     VALUES ('rg-21', 'u-21', 'Pecho', ?, ?)`,
+    [t, t],
+  );
+  await db.runAsync(
+    `INSERT INTO rutina_gimnasio_ejercicio (id, rutina_gimnasio_id, ejercicio_id, orden, created_at, updated_at)
+     VALUES ('rge-21', 'rg-21', 'ej-0', 0, ?, ?)`,
+    [t, t],
+  );
+  return db;
+}
+
+await prueba('la 021 sobre una base v20 con series: las preserva, recrea indices y foreign_key_check limpio', async () => {
+  const db = await baseV20('v21-test.db');
+  const v = await migrations.migrar(db);
+  igual(v, migrations.VERSION_ESQUEMA, 'queda en la ultima');
+
+  const series = await db.getAllAsync('SELECT * FROM serie ORDER BY orden');
+  igual(series.length, 3, 'las tres series siguen');
+  igual(series.map((s) => s.id).join(','), 's-21a,s-21b,s-21c', 'mismos ids');
+  igual(series[0].repeticiones, 8, 'repeticiones');
+  igual(series[1].peso_kg, 85, 'peso');
+  igual(series[2].peso_kg, null, 'peso corporal sigue en null');
+  igual(series[0].created_at, '2026-09-01T00:00:00.000Z', 'created_at');
+  igual(series.every((s) => s.duracion_seg === null), true, 'duracion_seg null');
+  igual(series.every((s) => s.es_calentamiento === 0), true, 'nada es calentamiento');
+
+  const indices = await db.getAllAsync(
+    "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'serie' AND name LIKE 'idx_%' ORDER BY name",
+  );
+  igual(indices.map((x) => x.name).join(','), 'idx_serie_ejercicio,idx_serie_sesion', 'indices de serie');
+  const vieja = await db.getFirstAsync("SELECT count(*) AS n FROM sqlite_master WHERE name = '_serie_v20'");
+  igual(vieja.n, 0, 'la tabla temporal no queda');
+  igual((await db.getAllAsync('PRAGMA foreign_key_check')).length, 0, 'foreign_key_check');
+
+  // Borrar el evento sigue arrastrando las series: la FK de la tabla nueva anda
+  await db.runAsync("DELETE FROM evento WHERE id = 'ev-21'");
+  igual((await db.getFirstAsync('SELECT count(*) AS n FROM serie')).n, 0, 'cascade');
+  await db.closeAsync();
+});
+
+await prueba('la 021 pasa a tiempo los ejercicios ya sembrados y deja el bloque en principal', async () => {
+  const db = await baseV20('v21-medida.db');
+  await migrations.migrar(db);
+
+  const tiempo = await db.getAllAsync("SELECT nombre FROM ejercicio WHERE medida = 'tiempo' ORDER BY nombre");
+  igual(tiempo.map((e) => e.nombre).join(','), [...POR_TIEMPO].sort().join(','), 'los nueve por tiempo');
+  const reps = await db.getFirstAsync("SELECT count(*) AS n FROM ejercicio WHERE medida = 'repeticiones'");
+  igual(reps.n, ejerciciosBase.EJERCICIOS_BASE.length - POR_TIEMPO.length, 'el resto por repeticiones');
+
+  const rge = await db.getFirstAsync("SELECT bloque FROM rutina_gimnasio_ejercicio WHERE id = 'rge-21'");
+  igual(rge.bloque, 'principal', 'bloque por defecto');
+  await lanza(
+    () => db.runAsync("UPDATE rutina_gimnasio_ejercicio SET bloque = 'otro' WHERE id = 'rge-21'"),
+    /CHECK/i, 'bloque invalido');
+  await lanza(
+    () => db.runAsync("UPDATE ejercicio SET medida = 'distancia' WHERE id = 'ej-0'"),
+    /CHECK/i, 'medida invalida');
+  await db.closeAsync();
+});
+
+await prueba('el CHECK de serie exige repeticiones o duracion, exactamente una', async () => {
+  const db = await baseV20('v21-check.db');
+  await migrations.migrar(db);
+  const t = '2026-09-02T00:00:00.000Z';
+  const insertar = (id, reps, dur) => db.runAsync(
+    `INSERT INTO serie (id, sesion_id, ejercicio_id, orden, repeticiones, duracion_seg, created_at, updated_at)
+     VALUES (?, 'se-21', 'ej-0', 9, ?, ?, ?, ?)`,
+    [id, reps, dur, t, t],
+  );
+  await lanza(() => insertar('x-vacia', null, null), /CHECK/i, 'las dos vacias');
+  await lanza(() => insertar('x-ambas', 10, 60), /CHECK/i, 'las dos cargadas');
+  await lanza(() => insertar('x-cero', null, 0), /CHECK/i, 'duracion 0');
+  await lanza(() => insertar('x-reps0', 0, null), /CHECK/i, 'repeticiones 0');
+  await insertar('x-tiempo', null, 60);
+  await insertar('x-reps', 10, null);
+  await lanza(
+    () => db.runAsync("UPDATE serie SET es_calentamiento = 2 WHERE id = 'x-reps'"),
+    /CHECK/i, 'es_calentamiento fuera de 0/1');
+  await db.closeAsync();
+});
+
+await prueba('una base nueva siembra la medida, los de calentamiento y crearEjercicio() guarda la medida', async () => {
+  const db = await schema.initDb(join(tmp, 'v21-nueva.db'));
+  const filas = await db.getAllAsync(
+    "SELECT nombre, grupo, medida FROM ejercicio WHERE medida = 'tiempo' ORDER BY nombre",
+  );
+  const nombres = filas.map((f) => f.nombre);
+  for (const n of POR_TIEMPO) igual(nombres.includes(n), true, `${n} por tiempo`);
+
+  const esperado = {
+    'Movilidad articular general': 'cardio/tiempo',
+    'Saltos de tijera': 'cardio/tiempo',
+    'Rotaciones de hombros con banda': 'hombros/repeticiones',
+    'Sentadilla con peso corporal': 'piernas/repeticiones',
+  };
+  for (const [nombre, gm] of Object.entries(esperado)) {
+    const f = await db.getFirstAsync('SELECT grupo, medida FROM ejercicio WHERE nombre = ?', [nombre]);
+    igual(f ? `${f.grupo}/${f.medida}` : null, gm, nombre);
+  }
+  igual(await meta.leerMeta(db, 'semilla_ejercicios'), '2', 'marca de la semilla');
+
+  const t = await qEjercicios.crearEjercicio({ id: 'ej-21-t', nombre: 'Sentadilla isometrica en pared', grupo: 'piernas', medida: 'tiempo' });
+  igual(t.medida, 'tiempo', 'ejercicio propio por tiempo');
+  const r = await qEjercicios.crearEjercicio({ id: 'ej-21-r', nombre: 'Remo invertido', grupo: 'espalda' });
+  igual(r.medida, 'repeticiones', 'ejercicio propio por defecto');
+  await schema.cerrarDb();
+});
+
+await prueba('el lote 2 de ejercicios se siembra sobre una base en lote 1 sin duplicar', async () => {
+  const db = await baseV20('v21-semilla.db');
+  await migrations.migrar(db);
+  await meta.escribirMeta(db, 'semilla_ejercicios', '1');
+  const antes = (await db.getFirstAsync('SELECT count(*) AS n FROM ejercicio')).n;
+
+  igual(await semillaEjercicios.sembrarEjercicios(db), 4, 'cuatro nuevos');
+  igual((await db.getFirstAsync('SELECT count(*) AS n FROM ejercicio')).n, antes + 4, 'total');
+  igual(await semillaEjercicios.sembrarEjercicios(db), 0, 'segunda corrida');
   await db.closeAsync();
 });
 
