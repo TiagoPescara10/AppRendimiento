@@ -18,6 +18,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Pantalla } from '@/ui/Pantalla';
+import { Chip } from '@/ui/Chip';
 import { colors, spacing, radius, fontSize, fontWeight, lineHeight, shadow, sizes } from '@/ui/theme';
 
 import { etiquetaTipo } from '@/features/agenda/formato';
@@ -574,33 +575,6 @@ function Macro({
 
 // ---------------------------------------------------------------------------
 
-function Chip({
-  texto,
-  activo,
-  onPress,
-}: {
-  texto: string;
-  activo: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected: activo }}
-      onPress={onPress}
-      style={({ pressed }) => [
-        estilos.chip,
-        activo && estilos.chipActivo,
-        pressed && !activo && estilos.chipPresionado,
-      ]}
-    >
-      <Text style={[estilos.chipTexto, activo && estilos.chipTextoActivo]}>{texto}</Text>
-    </Pressable>
-  );
-}
-
-// ---------------------------------------------------------------------------
-
 const estilos = StyleSheet.create({
   flex: { flex: 1 },
 
@@ -617,23 +591,6 @@ const estilos = StyleSheet.create({
   },
 
   chips: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.xs },
-  chip: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    borderWidth: sizes.hairline,
-    borderColor: colors.borderStrong,
-  },
-  chipActivo: { backgroundColor: colors.action, borderColor: colors.action },
-  chipPresionado: { backgroundColor: colors.surfaceAlt },
-  chipTexto: {
-    fontSize: fontSize.small,
-    lineHeight: lineHeight.small,
-    fontWeight: fontWeight.medium,
-    color: colors.textSecondary,
-  },
-  chipTextoActivo: { color: colors.textOnAction },
 
   headerSeccion: {
     flexDirection: 'row',

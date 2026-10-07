@@ -428,6 +428,20 @@ export default function Perfil() {
 
         <View style={estilos.separador} />
 
+        {/* Mis comidas: historial y recetas guardadas */}
+        <Pressable
+          style={estilos.opcionFila}
+          onPress={() => router.push('/perfil/comidas')}
+        >
+          <View style={estilos.opcionIzquierda}>
+            <Ionicons name="restaurant-outline" size={sizes.iconSmall} color={colors.textSecondary} />
+            <Text style={estilos.opcionTexto}>Mis comidas</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </Pressable>
+
+        <View style={estilos.separador} />
+
         {/* Avisos */}
         <Pressable
           style={estilos.opcionFila}
