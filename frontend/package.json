@@ -73,6 +73,7 @@
     "test:seed": "node scripts/probar-seed-desarrollo.mjs",
     "test:rondas": "node scripts/probar-rondas.mjs",
     "test:historial": "node scripts/probar-historial.mjs",
+    "test:semana": "node scripts/probar-mi-semana.mjs",
     "seed:dev": "node scripts/seed-desarrollo.mjs",
     "sonidos": "node scripts/generar-sonidos.mjs"
   },
