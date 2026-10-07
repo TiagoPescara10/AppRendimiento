@@ -6,6 +6,10 @@
 //
 // Los ejercicios van en dos bloques: un calentamiento opcional arriba y el
 // bloque principal. Sin calentamiento solo se ve un boton para sumarlo.
+//
+// Dentro de un bloque, dos ejercicios consecutivos se pueden unir en una
+// superserie, y encadenando mas, en un circuito. Cada bloque es una lista de
+// unidades (suelto o grupo); las operaciones viven en src/lib/superseries.ts.
 
 import { useState, useEffect, useRef } from 'react';
 import {
@@ -40,6 +44,18 @@ import {
   crearEjercicio,
 } from '@/db/queries/ejercicios';
 import { randomUUID } from '@/db/sync/uuid';
+import {
+  aDatos,
+  aplanar,
+  etiquetaGrupo,
+  moverDentroDeGrupo,
+  moverUnidad,
+  quitarDeUnidad,
+  separar,
+  unidadesDesdeFilas,
+  unirConSiguiente,
+  type Unidad,
+} from '@/lib/superseries';
 import type { BloqueRutina, EjercicioRow, GrupoMuscular, MedidaEjercicio } from '@/db/schema';
 
 // ---------------------------------------------------------------------------
@@ -62,76 +78,150 @@ const MEDIDAS: { valor: MedidaEjercicio; label: string }[] = [
   { valor: 'tiempo', label: 'Tiempo' },
 ];
 
-function mover<T>(lista: T[], index: number, direccion: 'arriba' | 'abajo'): T[] {
-  const nuevoIndex = direccion === 'arriba' ? index - 1 : index + 1;
-  if (nuevoIndex < 0 || nuevoIndex >= lista.length) return lista;
-  const copia = [...lista];
-  const item = copia[index];
-  copia[index] = copia[nuevoIndex];
-  copia[nuevoIndex] = item;
-  return copia;
+type Unidades = Unidad<EjercicioRow>[];
+
+/** Flechas para ordenar: arriba y abajo, apagadas en los bordes. */
+function Flechas({
+  primero,
+  ultimo,
+  onMover,
+}: {
+  primero: boolean;
+  ultimo: boolean;
+  onMover: (direccion: 'arriba' | 'abajo') => void;
+}) {
+  return (
+    <View style={estilos.itemBotonesOrden}>
+      <Pressable
+        disabled={primero}
+        style={[estilos.botonFlecha, primero && estilos.botonFlechaDeshabilitado]}
+        onPress={() => onMover('arriba')}
+        hitSlop={6}
+      >
+        <Ionicons name="chevron-up" size={18} color={primero ? colors.textMuted : colors.textPrimary} />
+      </Pressable>
+      <Pressable
+        disabled={ultimo}
+        style={[estilos.botonFlecha, ultimo && estilos.botonFlechaDeshabilitado]}
+        onPress={() => onMover('abajo')}
+        hitSlop={6}
+      >
+        <Ionicons name="chevron-down" size={18} color={ultimo ? colors.textMuted : colors.textPrimary} />
+      </Pressable>
+    </View>
+  );
 }
 
-/** Los ejercicios de un bloque, con flechas para ordenar y el tacho. */
-function ListaEjercicios({
-  ejercicios,
+/** Un ejercicio de la lista: numero, nombre, flechas y tacho. */
+function ItemEjercicio({
+  ej,
+  numero,
+  primero,
+  ultimo,
+  enGrupo,
   onMover,
   onQuitar,
 }: {
-  ejercicios: EjercicioRow[];
-  onMover: (index: number, direccion: 'arriba' | 'abajo') => void;
-  onQuitar: (index: number) => void;
+  ej: EjercicioRow;
+  numero: number;
+  primero: boolean;
+  ultimo: boolean;
+  enGrupo: boolean;
+  onMover: (direccion: 'arriba' | 'abajo') => void;
+  onQuitar: () => void;
 }) {
   return (
+    <View style={[estilos.itemEjercicio, enGrupo && estilos.itemEjercicioEnGrupo]}>
+      <Text style={estilos.itemNumero}>{numero}</Text>
+      <View style={estilos.itemInfo}>
+        <Text style={estilos.itemNombre}>{ej.nombre}</Text>
+        <Text style={estilos.itemGrupo}>
+          {ej.grupo}
+          {ej.medida === 'tiempo' ? ' · por tiempo' : ''}
+        </Text>
+      </View>
+      <Flechas primero={primero} ultimo={ultimo} onMover={onMover} />
+      <Pressable style={estilos.botonEliminar} onPress={onQuitar} hitSlop={8}>
+        <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+      </Pressable>
+    </View>
+  );
+}
+
+/**
+ * Los ejercicios de un bloque. Un suelto es una fila; un grupo va en un
+ * recuadro con su etiqueta, flechas que lo mueven entero y "Separar". Entre
+ * dos unidades consecutivas, "Unir con el siguiente".
+ */
+function ListaUnidades({
+  unidades,
+  onCambiar,
+}: {
+  unidades: Unidades;
+  onCambiar: (actualizar: (prev: Unidades) => Unidades) => void;
+}) {
+  let numero = 0;
+  return (
     <View style={estilos.listaEjercicios}>
-      {ejercicios.map((ej, idx) => (
-        <View key={ej.id} style={estilos.itemEjercicio}>
-          <Text style={estilos.itemNumero}>{idx + 1}</Text>
-          <View style={estilos.itemInfo}>
-            <Text style={estilos.itemNombre}>{ej.nombre}</Text>
-            <Text style={estilos.itemGrupo}>
-              {ej.grupo}
-              {ej.medida === 'tiempo' ? ' · por tiempo' : ''}
-            </Text>
-          </View>
+      {unidades.map((u, i) => {
+        const primera = i === 0;
+        const ultima = i === unidades.length - 1;
+        const contenido =
+          u.tipo === 'suelto' ? (
+            <ItemEjercicio
+              ej={u.item}
+              numero={++numero}
+              primero={primera}
+              ultimo={ultima}
+              enGrupo={false}
+              onMover={(dir) => onCambiar((prev) => moverUnidad(prev, i, dir))}
+              onQuitar={() => onCambiar((prev) => quitarDeUnidad(prev, i, 0))}
+            />
+          ) : (
+            <View style={estilos.grupoCaja}>
+              <View style={estilos.grupoCabecera}>
+                <Ionicons name="link-outline" size={16} color={colors.action} />
+                <Text style={estilos.grupoEtiqueta}>{etiquetaGrupo(u.items.length)}</Text>
+                <Flechas
+                  primero={primera}
+                  ultimo={ultima}
+                  onMover={(dir) => onCambiar((prev) => moverUnidad(prev, i, dir))}
+                />
+                <Pressable onPress={() => onCambiar((prev) => separar(prev, i))} hitSlop={8}>
+                  <Text style={estilos.enlaceAccion}>Separar</Text>
+                </Pressable>
+              </View>
+              {u.items.map((ej, k) => (
+                <ItemEjercicio
+                  key={ej.id}
+                  ej={ej}
+                  numero={++numero}
+                  primero={k === 0}
+                  ultimo={k === u.items.length - 1}
+                  enGrupo
+                  onMover={(dir) => onCambiar((prev) => moverDentroDeGrupo(prev, i, k, dir))}
+                  onQuitar={() => onCambiar((prev) => quitarDeUnidad(prev, i, k))}
+                />
+              ))}
+            </View>
+          );
 
-          {/* Ordenar arriba / abajo */}
-          <View style={estilos.itemBotonesOrden}>
-            <Pressable
-              disabled={idx === 0}
-              style={[estilos.botonFlecha, idx === 0 && estilos.botonFlechaDeshabilitado]}
-              onPress={() => onMover(idx, 'arriba')}
-              hitSlop={6}
-            >
-              <Ionicons
-                name="chevron-up"
-                size={18}
-                color={idx === 0 ? colors.textMuted : colors.textPrimary}
-              />
-            </Pressable>
-            <Pressable
-              disabled={idx === ejercicios.length - 1}
-              style={[
-                estilos.botonFlecha,
-                idx === ejercicios.length - 1 && estilos.botonFlechaDeshabilitado,
-              ]}
-              onPress={() => onMover(idx, 'abajo')}
-              hitSlop={6}
-            >
-              <Ionicons
-                name="chevron-down"
-                size={18}
-                color={idx === ejercicios.length - 1 ? colors.textMuted : colors.textPrimary}
-              />
-            </Pressable>
+        return (
+          <View key={u.tipo === 'suelto' ? u.item.id : u.items.map((e) => e.id).join('+')}>
+            {contenido}
+            {!ultima && (
+              <Pressable
+                style={estilos.unirFila}
+                onPress={() => onCambiar((prev) => unirConSiguiente(prev, i))}
+                hitSlop={4}
+              >
+                <Ionicons name="link-outline" size={14} color={colors.action} />
+                <Text style={estilos.enlaceAccion}>Unir con el siguiente</Text>
+              </Pressable>
+            )}
           </View>
-
-          {/* Eliminar de la rutina */}
-          <Pressable style={estilos.botonEliminar} onPress={() => onQuitar(idx)} hitSlop={8}>
-            <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
-          </Pressable>
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
@@ -145,9 +235,11 @@ export default function NuevaRutinaGimnasio() {
 
   const [nombre, setNombre] = useState('');
 
-  // Ejercicios elegidos en orden, por bloque
-  const [ejercicios, setEjercicios] = useState<EjercicioRow[]>([]);
-  const [calentamiento, setCalentamiento] = useState<EjercicioRow[]>([]);
+  // Ejercicios elegidos en orden, por bloque, como unidades (suelto o grupo)
+  const [principal, setPrincipal] = useState<Unidades>([]);
+  const [calentamientoU, setCalentamientoU] = useState<Unidades>([]);
+  const ejercicios = aplanar(principal);
+  const calentamiento = aplanar(calentamientoU);
   // A que bloque va lo que se elige en el buscador
   const [destino, setDestino] = useState<BloqueRutina>('principal');
 
@@ -172,8 +264,13 @@ export default function NuevaRutinaGimnasio() {
       .then((rg) => {
         if (!rg) return;
         setNombre(rg.nombre);
-        setEjercicios(rg.ejercicios.filter((e) => e.bloque === 'principal'));
-        setCalentamiento(rg.ejercicios.filter((e) => e.bloque === 'calentamiento'));
+        const grupoDe = (e: (typeof rg.ejercicios)[number]) => e.grupo_rutina;
+        setPrincipal(
+          unidadesDesdeFilas(rg.ejercicios.filter((e) => e.bloque === 'principal'), grupoDe),
+        );
+        setCalentamientoU(
+          unidadesDesdeFilas(rg.ejercicios.filter((e) => e.bloque === 'calentamiento'), grupoDe),
+        );
       })
       .catch((e) => console.error('Error al cargar rutina para edicion:', e));
   }, [rutinaId]);
@@ -215,8 +312,8 @@ export default function NuevaRutinaGimnasio() {
       );
       return;
     }
-    const setLista = destino === 'calentamiento' ? setCalentamiento : setEjercicios;
-    setLista((prev) => [...prev, ej]);
+    const setLista = destino === 'calentamiento' ? setCalentamientoU : setPrincipal;
+    setLista((prev) => [...prev, { tipo: 'suelto', item: ej }]);
   };
 
   const guardarNuevoEjercicio = async () => {
@@ -270,8 +367,8 @@ export default function NuevaRutinaGimnasio() {
         await actualizarRutinaGimnasio({
           id: rutinaId,
           nombre: nomLimpio,
-          ejercicio_ids: ejercicios.map((e) => e.id),
-          calentamiento_ids: calentamiento.map((e) => e.id),
+          ejercicio_ids: aDatos(principal, (e) => e.id),
+          calentamiento_ids: aDatos(calentamientoU, (e) => e.id),
         });
         router.back();
       } else {
@@ -280,8 +377,8 @@ export default function NuevaRutinaGimnasio() {
           usuario_id: perfil.id,
           nombre: nomLimpio,
           activa: true,
-          ejercicio_ids: ejercicios.map((e) => e.id),
-          calentamiento_ids: calentamiento.map((e) => e.id),
+          ejercicio_ids: aDatos(principal, (e) => e.id),
+          calentamiento_ids: aDatos(calentamientoU, (e) => e.id),
         });
         router.back();
       }
@@ -367,11 +464,7 @@ export default function NuevaRutinaGimnasio() {
               {calentamiento.length} {calentamiento.length === 1 ? 'ejercicio' : 'ejercicios'}
             </Text>
           </View>
-          <ListaEjercicios
-            ejercicios={calentamiento}
-            onMover={(idx, dir) => setCalentamiento((prev) => mover(prev, idx, dir))}
-            onQuitar={(idx) => setCalentamiento((prev) => prev.filter((_, i) => i !== idx))}
-          />
+          <ListaUnidades unidades={calentamientoU} onCambiar={setCalentamientoU} />
           <Pressable
             style={estilos.botonAgregarEjercicio}
             onPress={() => abrirBuscador('calentamiento')}
@@ -401,11 +494,7 @@ export default function NuevaRutinaGimnasio() {
             </Text>
           </View>
         ) : (
-          <ListaEjercicios
-            ejercicios={ejercicios}
-            onMover={(idx, dir) => setEjercicios((prev) => mover(prev, idx, dir))}
-            onQuitar={(idx) => setEjercicios((prev) => prev.filter((_, i) => i !== idx))}
-          />
+          <ListaUnidades unidades={principal} onCambiar={setPrincipal} />
         )}
 
         <Pressable
@@ -745,6 +834,47 @@ const estilos = StyleSheet.create({
   },
   botonEliminar: {
     padding: spacing.xs,
+  },
+
+  // Superseries y circuitos
+  itemEjercicioEnGrupo: {
+    // Adentro del recuadro la sombra sobra: el recuadro ya agrupa
+    shadowOpacity: 0,
+    elevation: 0,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  grupoCaja: {
+    gap: spacing.xs,
+    padding: spacing.xs,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.action,
+    backgroundColor: colors.accentSoft,
+  },
+  grupoCabecera: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.xs,
+  },
+  grupoEtiqueta: {
+    flex: 1,
+    fontSize: fontSize.small,
+    fontWeight: '700',
+    color: colors.action,
+  },
+  enlaceAccion: {
+    fontSize: fontSize.small,
+    fontWeight: '600',
+    color: colors.action,
+  },
+  unirFila: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
   },
 
   // Sin calentamiento: un enlace discreto, no una seccion vacia
