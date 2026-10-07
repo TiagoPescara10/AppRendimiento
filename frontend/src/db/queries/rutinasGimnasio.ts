@@ -16,6 +16,7 @@
 
 import { getDb } from '../schema';
 import type {
+  BloqueRutina,
   RutinaGimnasioRow,
   RutinaPredefinidaRow,
   EjercicioRow,
@@ -26,7 +27,9 @@ import { randomUUID } from '../sync/uuid';
 const ahora = (): string => new Date().toISOString();
 
 export interface EjercicioEnRutinaGimnasio extends EjercicioRow {
+  /** Orden dentro del bloque. */
   orden: number;
+  bloque: BloqueRutina;
   relacion_id: string;
 }
 
@@ -79,7 +82,36 @@ export interface NuevaRutinaGimnasio {
   usuario_id: string;
   nombre: string;
   activa?: boolean;
+  /** Bloque principal, en orden. */
   ejercicio_ids: string[];
+  /** Bloque de calentamiento, en orden. Opcional: si falta, no hay. */
+  calentamiento_ids?: string[];
+}
+
+/**
+ * Inserta los ejercicios de los dos bloques. El orden arranca en 0 en cada
+ * bloque: el calentamiento va primero por el bloque, no por el orden.
+ */
+async function insertarEjerciciosRutina(
+  rutinaId: string,
+  principal: string[],
+  calentamiento: string[],
+  t: string,
+): Promise<void> {
+  const bloques: [BloqueRutina, string[]][] = [
+    ['calentamiento', calentamiento],
+    ['principal', principal],
+  ];
+  for (const [bloque, ids] of bloques) {
+    for (let i = 0; i < ids.length; i++) {
+      await getDb().runAsync(
+        `INSERT INTO rutina_gimnasio_ejercicio
+           (id, rutina_gimnasio_id, ejercicio_id, orden, bloque, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [randomUUID(), rutinaId, ids[i], i, bloque, t, t],
+      );
+    }
+  }
 }
 
 export async function crearRutinaGimnasio(
@@ -103,14 +135,7 @@ export async function crearRutinaGimnasio(
       ],
     );
 
-    for (let i = 0; i < datos.ejercicio_ids.length; i++) {
-      await db.runAsync(
-        `INSERT INTO rutina_gimnasio_ejercicio
-           (id, rutina_gimnasio_id, ejercicio_id, orden, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [randomUUID(), datos.id, datos.ejercicio_ids[i], i, t, t],
-      );
-    }
+    await insertarEjerciciosRutina(datos.id, datos.ejercicio_ids, datos.calentamiento_ids ?? [], t);
   });
 
   const res = await obtenerRutinaGimnasio(datos.id);
@@ -129,11 +154,11 @@ export async function obtenerRutinaGimnasio(
   if (!fila) return null;
 
   const ejercicios = await db.getAllAsync<EjercicioEnRutinaGimnasio>(
-    `SELECT e.*, rge.orden, rge.id AS relacion_id
+    `SELECT e.*, rge.orden, rge.bloque, rge.id AS relacion_id
      FROM rutina_gimnasio_ejercicio rge
      JOIN ejercicio e ON e.id = rge.ejercicio_id
      WHERE rge.rutina_gimnasio_id = ?
-     ORDER BY rge.orden ASC`,
+     ORDER BY CASE rge.bloque WHEN 'calentamiento' THEN 0 ELSE 1 END, rge.orden ASC`,
     [id],
   );
 
@@ -229,6 +254,8 @@ export interface ActualizarRutinaGimnasio {
   id: string;
   nombre: string;
   ejercicio_ids: string[];
+  /** Si falta, la rutina queda sin calentamiento. */
+  calentamiento_ids?: string[];
 }
 
 export async function actualizarRutinaGimnasio(
@@ -249,14 +276,7 @@ export async function actualizarRutinaGimnasio(
       'DELETE FROM rutina_gimnasio_ejercicio WHERE rutina_gimnasio_id = ?',
       [datos.id],
     );
-    for (let i = 0; i < datos.ejercicio_ids.length; i++) {
-      await db.runAsync(
-        `INSERT INTO rutina_gimnasio_ejercicio
-           (id, rutina_gimnasio_id, ejercicio_id, orden, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [randomUUID(), datos.id, datos.ejercicio_ids[i], i, t, t],
-      );
-    }
+    await insertarEjerciciosRutina(datos.id, datos.ejercicio_ids, datos.calentamiento_ids ?? [], t);
   });
 
   const res = await obtenerRutinaGimnasio(datos.id);

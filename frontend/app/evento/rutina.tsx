@@ -64,7 +64,7 @@ import { useCronometroSerie } from '@/features/entrenamiento/useCronometroSerie'
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
 import { randomUUID } from '@/db/sync/uuid';
-import type { EjercicioRow, GrupoMuscular, MedidaEjercicio } from '@/db/schema';
+import type { BloqueRutina, EjercicioRow, GrupoMuscular, MedidaEjercicio } from '@/db/schema';
 
 // ---------------------------------------------------------------------------
 // Modelos locales
@@ -140,13 +140,24 @@ function seriesParaGuardar(item: EjercicioEnSesion): SerieBorrador[] {
 type Campo = 'kg' | 'reps' | 'tiempo';
 
 interface EjercicioEnSesion {
+  /**
+   * Identifica la tarjeta: bloque + ejercicio. Con calentamiento el mismo
+   * ejercicio puede estar en los dos bloques, asi que el id no alcanza.
+   */
+  clave: string;
+  bloque: BloqueRutina;
   ejercicio: EjercicioRow;
   series: SerieBorrador[];
 }
 
 interface SeleccionSerie {
-  ejercicioId: string;
+  /** EjercicioEnSesion.clave */
+  clave: string;
   serieId: string;
+}
+
+function claveDe(bloque: BloqueRutina, ejercicioId: string): string {
+  return `${bloque}:${ejercicioId}`;
 }
 
 const GRUPOS: { valor: GrupoMuscular | 'todos'; label: string }[] = [
@@ -262,8 +273,13 @@ export default function SesionRutina() {
           await Promise.all(
             rg.ejercicios.map(async (ej) => {
               try {
-                const prev = await obtenerSeriesPreviasPorEjercicio(p.id, ej.id);
-                if (prev.length > 0) mapa.set(ej.id, prev);
+                const prev = await obtenerSeriesPreviasPorEjercicio(
+                  p.id,
+                  ej.id,
+                  undefined,
+                  ej.bloque === 'calentamiento',
+                );
+                if (prev.length > 0) mapa.set(claveDe(ej.bloque, ej.id), prev);
               } catch (err) {
                 console.error('Error al precargar series previas de', ej.nombre, err);
               }
@@ -272,7 +288,8 @@ export default function SesionRutina() {
           setReferenciasPrevias(mapa);
 
           const inicial: EjercicioEnSesion[] = rg.ejercicios.map((ej) => {
-            const previas = mapa.get(ej.id) ?? [];
+            const clave = claveDe(ej.bloque, ej.id);
+            const previas = mapa.get(clave) ?? [];
             const cantSeries = Math.max(3, previas.length);
             const series: SerieBorrador[] = [];
 
@@ -280,7 +297,7 @@ export default function SesionRutina() {
               series.push(serieDesdePrevia(previas[i]));
             }
 
-            return { ejercicio: ej, series };
+            return { clave, bloque: ej.bloque, ejercicio: ej, series };
           });
 
           setEjerciciosSesion(inicial);
@@ -288,13 +305,13 @@ export default function SesionRutina() {
           // Desplegar el primer ejercicio y enfocar su primera serie
           if (inicial.length > 0) {
             const primerEj = inicial[0];
-            setEjercicioExpandidoId(primerEj.ejercicio.id);
+            setEjercicioExpandidoId(primerEj.clave);
             if (primerEj.series.length > 0) {
               setSerieActiva({
-                ejercicioId: primerEj.ejercicio.id,
+                clave: primerEj.clave,
                 serieId: primerEj.series[0].id,
               });
-              setCampoActivo(campoInicial(primerEj.ejercicio, mapa.get(primerEj.ejercicio.id)));
+              setCampoActivo(campoInicial(primerEj.ejercicio, mapa.get(primerEj.clave)));
             }
           }
         }
@@ -329,6 +346,7 @@ export default function SesionRutina() {
   }, [ejerciciosSesion]);
 
   const progresoRatio = totalEjercicios > 0 ? ejerciciosCompletados / totalEjercicios : 0;
+  const hayCalentamiento = ejerciciosSesion.some((e) => e.bloque === 'calentamiento');
 
   // Agregar ejercicio desde catalogo
   const seleccionarEjercicio = async (ej: EjercicioRow) => {
@@ -337,12 +355,14 @@ export default function SesionRutina() {
     setCreandoEjercicio(false);
     setNuevoNombre('');
 
-    let previas: SeriePreviaEjercicio[] = referenciasPrevias.get(ej.id) ?? [];
-    if (usuarioId && !referenciasPrevias.has(ej.id)) {
+    // Lo que se suma durante la sesion va al bloque principal
+    const clave = claveDe('principal', ej.id);
+    let previas: SeriePreviaEjercicio[] = referenciasPrevias.get(clave) ?? [];
+    if (usuarioId && !referenciasPrevias.has(clave)) {
       try {
-        previas = await obtenerSeriesPreviasPorEjercicio(usuarioId, ej.id);
+        previas = await obtenerSeriesPreviasPorEjercicio(usuarioId, ej.id, undefined, false);
         if (previas.length > 0) {
-          setReferenciasPrevias((m) => new Map(m).set(ej.id, previas));
+          setReferenciasPrevias((m) => new Map(m).set(clave, previas));
         }
       } catch (e) {
         console.error('Error al cargar referencia previa:', e);
@@ -356,14 +376,16 @@ export default function SesionRutina() {
     }
 
     const nuevoItem: EjercicioEnSesion = {
+      clave,
+      bloque: 'principal',
       ejercicio: ej,
       series: nuevasSeries,
     };
 
     setEjerciciosSesion((prev) => [...prev, nuevoItem]);
-    setEjercicioExpandidoId(ej.id);
+    setEjercicioExpandidoId(clave);
     if (nuevasSeries.length > 0) {
-      setSerieActiva({ ejercicioId: ej.id, serieId: nuevasSeries[0].id });
+      setSerieActiva({ clave, serieId: nuevasSeries[0].id });
       setCampoActivo(campoInicial(ej, previas));
     }
   };
@@ -394,19 +416,19 @@ export default function SesionRutina() {
   };
 
   // Alternar acordeon de ejercicio
-  const toggleAcordeon = (ejercicioId: string) => {
-    if (ejercicioExpandidoId === ejercicioId) {
+  const toggleAcordeon = (clave: string) => {
+    if (ejercicioExpandidoId === clave) {
       setEjercicioExpandidoId(null);
       setSerieActiva(null);
     } else {
-      setEjercicioExpandidoId(ejercicioId);
-      const item = ejerciciosSesion.find((e) => e.ejercicio.id === ejercicioId);
+      setEjercicioExpandidoId(clave);
+      const item = ejerciciosSesion.find((e) => e.clave === clave);
       if (item && item.series.length > 0) {
         // Al abrir un ejercicio, enfocar la primera serie pendiente si existe
         const pendiente = item.series.find((s) => !s.confirmada) ?? null;
         if (pendiente) {
-          setSerieActiva({ ejercicioId, serieId: pendiente.id });
-          setCampoActivo(campoInicial(item.ejercicio, referenciasPrevias.get(ejercicioId)));
+          setSerieActiva({ clave, serieId: pendiente.id });
+          setCampoActivo(campoInicial(item.ejercicio, referenciasPrevias.get(clave)));
         } else {
           // Si todas estan confirmadas, no abrir el keypad hasta que toque explicitamente
           setSerieActiva(null);
@@ -416,29 +438,29 @@ export default function SesionRutina() {
   };
 
   // Agregar serie al ejercicio
-  const agregarSerie = (ejercicioId: string) => {
+  const agregarSerie = (clave: string) => {
     let nuevaId = '';
     setEjerciciosSesion((prev) =>
       prev.map((item) => {
-        if (item.ejercicio.id !== ejercicioId) return item;
+        if (item.clave !== clave) return item;
         const nueva = serieComoLaUltima(item.series[item.series.length - 1]);
         nuevaId = nueva.id;
         return { ...item, series: [...item.series, nueva] };
       }),
     );
     if (nuevaId) {
-      setSerieActiva({ ejercicioId, serieId: nuevaId });
-      const item = ejerciciosSesion.find((e) => e.ejercicio.id === ejercicioId);
+      setSerieActiva({ clave, serieId: nuevaId });
+      const item = ejerciciosSesion.find((e) => e.clave === clave);
       if (item) {
-        setCampoActivo(campoInicial(item.ejercicio, referenciasPrevias.get(ejercicioId)));
+        setCampoActivo(campoInicial(item.ejercicio, referenciasPrevias.get(clave)));
       }
     }
   };
 
   // Quitar ejercicio
-  const quitarEjercicio = (ejercicioId: string) => {
-    setEjerciciosSesion((prev) => prev.filter((item) => item.ejercicio.id !== ejercicioId));
-    if (ejercicioExpandidoId === ejercicioId) {
+  const quitarEjercicio = (clave: string) => {
+    setEjerciciosSesion((prev) => prev.filter((item) => item.clave !== clave));
+    if (ejercicioExpandidoId === clave) {
       setEjercicioExpandidoId(null);
       setSerieActiva(null);
     }
@@ -449,7 +471,7 @@ export default function SesionRutina() {
   // ---------------------------------------------------------------------------
 
   const itemActivo = useMemo(
-    () => ejerciciosSesion.find((item) => item.ejercicio.id === serieActiva?.ejercicioId),
+    () => ejerciciosSesion.find((item) => item.clave === serieActiva?.clave),
     [ejerciciosSesion, serieActiva],
   );
 
@@ -476,7 +498,7 @@ export default function SesionRutina() {
     !activoPorTiempo || (!!serieActivaObj && tiempoListo(serieActivaObj) && !cronometro.corriendo);
   // El tiempo de la misma serie la vez anterior, para mostrarlo como objetivo
   const objetivoSeg = activoPorTiempo
-    ? referenciasPrevias.get(itemActivo.ejercicio.id)?.[serieActivaNumero - 1]?.duracion_seg ?? null
+    ? referenciasPrevias.get(itemActivo.clave)?.[serieActivaNumero - 1]?.duracion_seg ?? null
     : null;
 
   // Modificar valores de la serie activa
@@ -486,7 +508,7 @@ export default function SesionRutina() {
     if (!serieActiva) return;
     setEjerciciosSesion((prev) =>
       prev.map((item) => {
-        if (item.ejercicio.id !== serieActiva.ejercicioId) return item;
+        if (item.clave !== serieActiva.clave) return item;
         return {
           ...item,
           series: item.series.map((s) => {
@@ -638,22 +660,22 @@ export default function SesionRutina() {
     // no avanzar ciegamente: buscar si queda alguna serie pendiente real
     if (estabaConfirmada) {
       // Buscar siguiente serie pendiente en este u otro ejercicio
-      let siguientePendiente: { ejId: string; serieId: string; campo: Campo } | null = null;
+      let siguientePendiente: { claveEj: string; serieId: string; campo: Campo } | null = null;
       for (const ejItem of ejerciciosSesion) {
         const pendiente = ejItem.series.find((s) => !s.confirmada && s.id !== serieActiva.serieId);
         if (pendiente) {
           siguientePendiente = {
-            ejId: ejItem.ejercicio.id,
+            claveEj: ejItem.clave,
             serieId: pendiente.id,
-            campo: campoInicial(ejItem.ejercicio, referenciasPrevias.get(ejItem.ejercicio.id)),
+            campo: campoInicial(ejItem.ejercicio, referenciasPrevias.get(ejItem.clave)),
           };
           break;
         }
       }
 
       if (siguientePendiente) {
-        setEjercicioExpandidoId(siguientePendiente.ejId);
-        setSerieActiva({ ejercicioId: siguientePendiente.ejId, serieId: siguientePendiente.serieId });
+        setEjercicioExpandidoId(siguientePendiente.claveEj);
+        setSerieActiva({ clave: siguientePendiente.claveEj, serieId: siguientePendiente.serieId });
         setCampoActivo(siguientePendiente.campo);
       } else {
         // No hay pendientes: cerrar keypad limpiamente
@@ -663,7 +685,7 @@ export default function SesionRutina() {
     }
 
     // CASO SERIE PENDIENTE NUEVA: Auto-avance progresivo
-    const ejIdx = ejerciciosSesion.findIndex((e) => e.ejercicio.id === serieActiva.ejercicioId);
+    const ejIdx = ejerciciosSesion.findIndex((e) => e.clave === serieActiva.clave);
     if (ejIdx < 0) return;
 
     const seriesDelEj = ejerciciosSesion[ejIdx].series;
@@ -673,10 +695,10 @@ export default function SesionRutina() {
     if (serieIdx >= 0 && serieIdx < seriesDelEj.length - 1) {
       const prox = seriesDelEj[serieIdx + 1];
       setSerieActiva({
-        ejercicioId: serieActiva.ejercicioId,
+        clave: serieActiva.clave,
         serieId: prox.id,
       });
-      setCampoActivo(campoInicial(itemActivo.ejercicio, referenciasPrevias.get(itemActivo.ejercicio.id)));
+      setCampoActivo(campoInicial(itemActivo.ejercicio, referenciasPrevias.get(itemActivo.clave)));
       return;
     }
 
@@ -698,12 +720,12 @@ export default function SesionRutina() {
     }
 
     if (proxEjercicio) {
-      const proxEjId = proxEjercicio.ejercicio.id;
+      const proxEjId = proxEjercicio.clave;
       setEjercicioExpandidoId(proxEjId);
       const primeraPendiente =
         proxEjercicio.series.find((s) => !s.confirmada) ?? proxEjercicio.series[0];
       setSerieActiva({
-        ejercicioId: proxEjId,
+        clave: proxEjId,
         serieId: primeraPendiente.id,
       });
       setCampoActivo(campoInicial(proxEjercicio.ejercicio, referenciasPrevias.get(proxEjId)));
@@ -738,11 +760,13 @@ export default function SesionRutina() {
               repeticiones: null,
               duracionSeg: s.duracionSeg,
               pesoKg: s.conPeso ? s.pesoKg : null,
+              esCalentamiento: item.bloque === 'calentamiento',
             }
           : {
               ejercicioId: item.ejercicio.id,
               repeticiones: s.repeticiones,
               pesoKg: s.pesoKg,
+              esCalentamiento: item.bloque === 'calentamiento',
             },
       ),
     );
@@ -774,11 +798,13 @@ export default function SesionRutina() {
         });
 
         // Mismo filtro que listaSeriesPlana: se muestra lo que se guardo, y un
-        // ejercicio sin ninguna serie guardada no aparece.
+        // ejercicio sin ninguna serie guardada no aparece. El calentamiento no
+        // es parte del resumen.
         setTerminado(
           ejerciciosSesion
+            .filter((item) => item.bloque === 'principal')
             .map((item) => ({
-              id: item.ejercicio.id,
+              id: item.clave,
               nombre: item.ejercicio.nombre,
               detalle: textoSeriesEjercicio(
                 seriesParaGuardar(item).map((s) =>
@@ -911,29 +937,40 @@ export default function SesionRutina() {
             </Text>
           </View>
         ) : (
-          ejerciciosSesion.map((item) => {
-            const ejId = item.ejercicio.id;
-            const expandido = ejercicioExpandidoId === ejId;
-            const previas = referenciasPrevias.get(ejId) ?? [];
+          ejerciciosSesion.map((item, idx) => {
+            const claveEj = item.clave;
+            // Con calentamiento, cada bloque lleva su titulo. Sin el, la lista
+            // queda como siempre.
+            const tituloBloque =
+              hayCalentamiento && (idx === 0 || ejerciciosSesion[idx - 1].bloque !== item.bloque)
+                ? item.bloque === 'calentamiento'
+                  ? 'Calentamiento'
+                  : 'Principal'
+                : null;
+            const expandido = ejercicioExpandidoId === claveEj;
+            const previas = referenciasPrevias.get(claveEj) ?? [];
             const pendientes = item.series.filter((s) => !s.confirmada).length;
             const completado = item.series.length > 0 && pendientes === 0;
             const porTiempo = esPorTiempo(item.ejercicio);
 
             return (
               <View
-                key={ejId}
+                key={claveEj}
+                onLayout={(e) => {
+                  posicionesY.current[claveEj] = e.nativeEvent.layout.y;
+                }}
+              >
+              {tituloBloque && <Text style={estilos.tituloBloque}>{tituloBloque}</Text>}
+              <View
                 style={[
                   estilos.acordeonCard,
                   expandido && estilos.acordeonCardExpandido,
                 ]}
-                onLayout={(e) => {
-                  posicionesY.current[ejId] = e.nativeEvent.layout.y;
-                }}
               >
                 {/* Cabecera del acordeon */}
                 <Pressable
                   style={estilos.acordeonCabecera}
-                  onPress={() => toggleAcordeon(ejId)}
+                  onPress={() => toggleAcordeon(claveEj)}
                 >
                   <View style={estilos.acordeonInfo}>
                     <Text style={estilos.acordeonTitulo}>{item.ejercicio.nombre}</Text>
@@ -980,7 +1017,7 @@ export default function SesionRutina() {
                     <View style={estilos.filasContenedor}>
                       {item.series.map((s, sIdx) => {
                         const esActiva =
-                          serieActiva?.ejercicioId === ejId && serieActiva?.serieId === s.id;
+                          serieActiva?.clave === claveEj && serieActiva?.serieId === s.id;
                         const prev = previas[sIdx];
 
                         let textoAnterior = '—';
@@ -1003,13 +1040,13 @@ export default function SesionRutina() {
                             // Serie confirmada: no hace nada en toque simple para evitar ediciones accidentales
                             return;
                           }
-                          setSerieActiva({ ejercicioId: ejId, serieId: s.id });
+                          setSerieActiva({ clave: claveEj, serieId: s.id });
                           setCampoActivo(campoObjetivo ?? campoInicial(item.ejercicio, previas));
                         };
 
                         // Toque largo en serie confirmada: permite corregir
                         const handleLongPressConfirmada = () => {
-                          setSerieActiva({ ejercicioId: ejId, serieId: s.id });
+                          setSerieActiva({ clave: claveEj, serieId: s.id });
                           setCampoActivo(campoInicial(item.ejercicio, previas));
                         };
 
@@ -1017,10 +1054,10 @@ export default function SesionRutina() {
                         const handlePressEstado = () => {
                           if (s.confirmada) {
                             // Reabrir serie para corregir
-                            setSerieActiva({ ejercicioId: ejId, serieId: s.id });
+                            setSerieActiva({ clave: claveEj, serieId: s.id });
                             setEjerciciosSesion((prevArr) =>
                               prevArr.map((eIt) => {
-                                if (eIt.ejercicio.id !== ejId) return eIt;
+                                if (eIt.clave !== claveEj) return eIt;
                                 return {
                                   ...eIt,
                                   series: eIt.series.map((ser) =>
@@ -1032,13 +1069,13 @@ export default function SesionRutina() {
                             setCampoActivo(campoInicial(item.ejercicio, previas));
                           } else if (porTiempo && !tiempoListo(s)) {
                             // Por tiempo y sin tiempo: no hay nada que confirmar, se abre para cargarlo
-                            setSerieActiva({ ejercicioId: ejId, serieId: s.id });
+                            setSerieActiva({ clave: claveEj, serieId: s.id });
                             setCampoActivo('tiempo');
                           } else {
                             // Confirmar de inmediato con los valores actuales
                             setEjerciciosSesion((prevArr) =>
                               prevArr.map((eIt) => {
-                                if (eIt.ejercicio.id !== ejId) return eIt;
+                                if (eIt.clave !== claveEj) return eIt;
                                 return {
                                   ...eIt,
                                   series: eIt.series.map((ser) =>
@@ -1174,7 +1211,7 @@ export default function SesionRutina() {
                     <View style={estilos.accionesPieEjercicio}>
                       <Pressable
                         style={estilos.botonAgregarSerie}
-                        onPress={() => agregarSerie(ejId)}
+                        onPress={() => agregarSerie(claveEj)}
                         hitSlop={8}
                       >
                         <Ionicons name="add" size={16} color={colors.action} />
@@ -1182,7 +1219,7 @@ export default function SesionRutina() {
                       </Pressable>
 
                       <Pressable
-                        onPress={() => quitarEjercicio(ejId)}
+                        onPress={() => quitarEjercicio(claveEj)}
                         hitSlop={8}
                         style={estilos.botonEliminarEjercicio}
                       >
@@ -1191,6 +1228,7 @@ export default function SesionRutina() {
                     </View>
                   </View>
                 )}
+              </View>
               </View>
             );
           })
@@ -1804,6 +1842,16 @@ const estilos = StyleSheet.create({
     borderTopColor: colors.border,
     padding: spacing.md,
     backgroundColor: colors.surface,
+  },
+
+  // Titulo de bloque (Calentamiento / Principal) sobre las tarjetas
+  tituloBloque: {
+    fontSize: fontSize.caption,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
   },
 
   // Tabla de series

@@ -3154,6 +3154,71 @@ await prueba('guardarRutinaTerminada() guarda series por tiempo y el Anterior la
   await schema.cerrarDb();
 });
 
+await prueba('rutina con calentamiento: bloques en orden, edicion y copia de predefinida en principal', async () => {
+  const db = await schema.initDb(join(tmp, 'v21-bloques.db'));
+  await qPerfil.crearPerfil({ id: 'u-b', fecha_alta: '2026-09-01T10:00:00-03:00' });
+  const id = async (nombre) => (await db.getFirstAsync('SELECT id FROM ejercicio WHERE nombre = ?', [nombre])).id;
+  const movilidad = await id('Movilidad articular general');
+  const sentadillaCorp = await id('Sentadilla con peso corporal');
+  const sentadilla = await id('Sentadilla trasera con barra');
+  const prensa = await id('Prensa de piernas inclinada');
+
+  const rg = await qRutinasGimnasio.crearRutinaGimnasio({
+    id: 'rg-b', usuario_id: 'u-b', nombre: 'Piernas',
+    ejercicio_ids: [sentadilla, prensa],
+    calentamiento_ids: [movilidad, sentadillaCorp],
+  });
+  igual(rg.ejercicios.map((e) => e.bloque).join(','), 'calentamiento,calentamiento,principal,principal', 'bloques');
+  igual(rg.ejercicios.map((e) => e.id).join(','), [movilidad, sentadillaCorp, sentadilla, prensa].join(','), 'calentamiento primero');
+  igual(rg.ejercicios.map((e) => e.orden).join(','), '0,1,0,1', 'orden por bloque');
+  igual(rg.ejercicios[0].medida, 'tiempo', 'la medida viene con el ejercicio');
+
+  // El mismo ejercicio puede estar en los dos bloques
+  const editada = await qRutinasGimnasio.actualizarRutinaGimnasio({
+    id: 'rg-b', nombre: 'Piernas',
+    ejercicio_ids: [sentadilla, prensa],
+    calentamiento_ids: [sentadilla],
+  });
+  igual(editada.ejercicios.map((e) => `${e.bloque}:${e.id === sentadilla}`).join(','),
+    'calentamiento:true,principal:true,principal:false', 'mismo ejercicio en los dos bloques');
+
+  // Sin calentamiento_ids la rutina queda sin calentamiento
+  const sinCal = await qRutinasGimnasio.actualizarRutinaGimnasio({ id: 'rg-b', nombre: 'Piernas', ejercicio_ids: [prensa] });
+  igual(sinCal.ejercicios.map((e) => e.bloque).join(','), 'principal', 'sin calentamiento');
+
+  const predef = (await qRutinasGimnasio.listarRutinasPredefinidas())[0];
+  const copia = await qRutinasGimnasio.copiarRutinaPredefinida(predef.id, 'u-b');
+  igual(copia.ejercicios.every((e) => e.bloque === 'principal'), true, 'la copia va toda a principal');
+  await schema.cerrarDb();
+});
+
+await prueba('las series guardan si son de calentamiento y el Anterior mira el mismo bloque', async () => {
+  const db = await schema.initDb(join(tmp, 'v21-cal-series.db'));
+  await qPerfil.crearPerfil({ id: 'u-c', fecha_alta: '2026-09-01T10:00:00-03:00' });
+  const sentadilla = (await db.getFirstAsync("SELECT id FROM ejercicio WHERE nombre = 'Sentadilla trasera con barra'")).id;
+
+  const res = await guardarRutina.guardarRutinaTerminada({
+    usuarioId: 'u-c',
+    inicio: new Date(2026, 8, 2, 18, 0, 0),
+    duracionRealSeg: 3000,
+    series: [
+      { ejercicioId: sentadilla, repeticiones: 12, pesoKg: 20, esCalentamiento: true },
+      { ejercicioId: sentadilla, repeticiones: 8, pesoKg: 100 },
+      { ejercicioId: sentadilla, repeticiones: 6, pesoKg: 110 },
+    ],
+  });
+  const filas = await db.getAllAsync('SELECT es_calentamiento FROM serie WHERE sesion_id = ? ORDER BY orden', [res.sesion.id]);
+  igual(filas.map((f) => f.es_calentamiento).join(','), '1,0,0', 'es_calentamiento por serie');
+
+  const cal = await qSesiones.obtenerSeriesPreviasPorEjercicio('u-c', sentadilla, undefined, true);
+  igual(cal.map((p) => p.peso_kg).join(','), '20', 'anterior del calentamiento');
+  const principal = await qSesiones.obtenerSeriesPreviasPorEjercicio('u-c', sentadilla, undefined, false);
+  igual(principal.map((p) => p.peso_kg).join(','), '100,110', 'anterior del principal');
+  const todas = await qSesiones.obtenerSeriesPreviasPorEjercicio('u-c', sentadilla);
+  igual(todas.length, 3, 'sin bloque trae todo, como antes');
+  await schema.cerrarDb();
+});
+
 // --- salida ----------------------------------------------------------------
 
 rmSync(tmp, { recursive: true, force: true });

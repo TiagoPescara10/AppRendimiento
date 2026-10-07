@@ -3,6 +3,9 @@
 // Pantalla para definir una nueva rutina de gimnasio (catalogo de ejercicios).
 // Solo pide nombre y seleccion ordenada de ejercicios. La programacion de dias
 // y horarios se hace exclusivamente desde Nuevo evento.
+//
+// Los ejercicios van en dos bloques: un calentamiento opcional arriba y el
+// bloque principal. Sin calentamiento solo se ve un boton para sumarlo.
 
 import { useState, useEffect, useRef } from 'react';
 import {
@@ -37,7 +40,7 @@ import {
   crearEjercicio,
 } from '@/db/queries/ejercicios';
 import { randomUUID } from '@/db/sync/uuid';
-import type { EjercicioRow, GrupoMuscular, MedidaEjercicio } from '@/db/schema';
+import type { BloqueRutina, EjercicioRow, GrupoMuscular, MedidaEjercicio } from '@/db/schema';
 
 // ---------------------------------------------------------------------------
 // Constantes y helpers
@@ -59,6 +62,80 @@ const MEDIDAS: { valor: MedidaEjercicio; label: string }[] = [
   { valor: 'tiempo', label: 'Tiempo' },
 ];
 
+function mover<T>(lista: T[], index: number, direccion: 'arriba' | 'abajo'): T[] {
+  const nuevoIndex = direccion === 'arriba' ? index - 1 : index + 1;
+  if (nuevoIndex < 0 || nuevoIndex >= lista.length) return lista;
+  const copia = [...lista];
+  const item = copia[index];
+  copia[index] = copia[nuevoIndex];
+  copia[nuevoIndex] = item;
+  return copia;
+}
+
+/** Los ejercicios de un bloque, con flechas para ordenar y el tacho. */
+function ListaEjercicios({
+  ejercicios,
+  onMover,
+  onQuitar,
+}: {
+  ejercicios: EjercicioRow[];
+  onMover: (index: number, direccion: 'arriba' | 'abajo') => void;
+  onQuitar: (index: number) => void;
+}) {
+  return (
+    <View style={estilos.listaEjercicios}>
+      {ejercicios.map((ej, idx) => (
+        <View key={ej.id} style={estilos.itemEjercicio}>
+          <Text style={estilos.itemNumero}>{idx + 1}</Text>
+          <View style={estilos.itemInfo}>
+            <Text style={estilos.itemNombre}>{ej.nombre}</Text>
+            <Text style={estilos.itemGrupo}>
+              {ej.grupo}
+              {ej.medida === 'tiempo' ? ' · por tiempo' : ''}
+            </Text>
+          </View>
+
+          {/* Ordenar arriba / abajo */}
+          <View style={estilos.itemBotonesOrden}>
+            <Pressable
+              disabled={idx === 0}
+              style={[estilos.botonFlecha, idx === 0 && estilos.botonFlechaDeshabilitado]}
+              onPress={() => onMover(idx, 'arriba')}
+              hitSlop={6}
+            >
+              <Ionicons
+                name="chevron-up"
+                size={18}
+                color={idx === 0 ? colors.textMuted : colors.textPrimary}
+              />
+            </Pressable>
+            <Pressable
+              disabled={idx === ejercicios.length - 1}
+              style={[
+                estilos.botonFlecha,
+                idx === ejercicios.length - 1 && estilos.botonFlechaDeshabilitado,
+              ]}
+              onPress={() => onMover(idx, 'abajo')}
+              hitSlop={6}
+            >
+              <Ionicons
+                name="chevron-down"
+                size={18}
+                color={idx === ejercicios.length - 1 ? colors.textMuted : colors.textPrimary}
+              />
+            </Pressable>
+          </View>
+
+          {/* Eliminar de la rutina */}
+          <Pressable style={estilos.botonEliminar} onPress={() => onQuitar(idx)} hitSlop={8}>
+            <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+          </Pressable>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export default function NuevaRutinaGimnasio() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -68,8 +145,11 @@ export default function NuevaRutinaGimnasio() {
 
   const [nombre, setNombre] = useState('');
 
-  // Ejercicios elegidos en orden
+  // Ejercicios elegidos en orden, por bloque
   const [ejercicios, setEjercicios] = useState<EjercicioRow[]>([]);
+  const [calentamiento, setCalentamiento] = useState<EjercicioRow[]>([]);
+  // A que bloque va lo que se elige en el buscador
+  const [destino, setDestino] = useState<BloqueRutina>('principal');
 
   // Buscador de ejercicios modal
   const [modalBuscador, setModalBuscador] = useState(false);
@@ -92,7 +172,8 @@ export default function NuevaRutinaGimnasio() {
       .then((rg) => {
         if (!rg) return;
         setNombre(rg.nombre);
-        setEjercicios(rg.ejercicios);
+        setEjercicios(rg.ejercicios.filter((e) => e.bloque === 'principal'));
+        setCalentamiento(rg.ejercicios.filter((e) => e.bloque === 'calentamiento'));
       })
       .catch((e) => console.error('Error al cargar rutina para edicion:', e));
   }, [rutinaId]);
@@ -115,29 +196,27 @@ export default function NuevaRutinaGimnasio() {
     })().catch(console.error);
   }, [modalBuscador, busqueda, grupoFiltro]);
 
+  const abrirBuscador = (bloque: BloqueRutina) => {
+    setDestino(bloque);
+    setModalBuscador(true);
+  };
+
+  // Un ejercicio no se repite dentro de un bloque, pero puede estar en los dos
   const seleccionarEjercicio = (ej: EjercicioRow) => {
     setModalBuscador(false);
     setBusqueda('');
-    if (ejercicios.some((e) => e.id === ej.id)) {
-      Alert.alert('Ejercicio ya agregado', 'Ese ejercicio ya forma parte de esta rutina.');
+    const lista = destino === 'calentamiento' ? calentamiento : ejercicios;
+    if (lista.some((e) => e.id === ej.id)) {
+      Alert.alert(
+        'Ejercicio ya agregado',
+        destino === 'calentamiento'
+          ? 'Ese ejercicio ya está en el calentamiento.'
+          : 'Ese ejercicio ya forma parte de esta rutina.',
+      );
       return;
     }
-    setEjercicios((prev) => [...prev, ej]);
-  };
-
-  const moverEjercicio = (index: number, direccion: 'arriba' | 'abajo') => {
-    const nuevoIndex = direccion === 'arriba' ? index - 1 : index + 1;
-    if (nuevoIndex < 0 || nuevoIndex >= ejercicios.length) return;
-
-    const copia = [...ejercicios];
-    const item = copia[index];
-    copia[index] = copia[nuevoIndex];
-    copia[nuevoIndex] = item;
-    setEjercicios(copia);
-  };
-
-  const quitarEjercicio = (index: number) => {
-    setEjercicios((prev) => prev.filter((_, i) => i !== index));
+    const setLista = destino === 'calentamiento' ? setCalentamiento : setEjercicios;
+    setLista((prev) => [...prev, ej]);
   };
 
   const guardarNuevoEjercicio = async () => {
@@ -192,6 +271,7 @@ export default function NuevaRutinaGimnasio() {
           id: rutinaId,
           nombre: nomLimpio,
           ejercicio_ids: ejercicios.map((e) => e.id),
+          calentamiento_ids: calentamiento.map((e) => e.id),
         });
         router.back();
       } else {
@@ -201,6 +281,7 @@ export default function NuevaRutinaGimnasio() {
           nombre: nomLimpio,
           activa: true,
           ejercicio_ids: ejercicios.map((e) => e.id),
+          calentamiento_ids: calentamiento.map((e) => e.id),
         });
         router.back();
       }
@@ -217,7 +298,7 @@ export default function NuevaRutinaGimnasio() {
   // se reemplaza esta pantalla, asi al volver de la copia no aparece una
   // rutina en blanco detras. Si ya hay algo cargado se apila, para no perderlo.
   const abrirPredefinidas = () => {
-    const vacio = nombre.trim() === '' && ejercicios.length === 0;
+    const vacio = nombre.trim() === '' && ejercicios.length === 0 && calentamiento.length === 0;
     if (vacio) router.replace('/rutina-gimnasio/predefinidas');
     else router.push('/rutina-gimnasio/predefinidas');
   };
@@ -268,10 +349,45 @@ export default function NuevaRutinaGimnasio() {
         </Text>
       </View>
 
-      {/* Lista de ejercicios */}
+      {/* Calentamiento: opcional. Vacio, es solo un boton para sumarlo */}
+      {calentamiento.length === 0 ? (
+        <Pressable
+          style={estilos.botonSumarCalentamiento}
+          onPress={() => abrirBuscador('calentamiento')}
+          hitSlop={8}
+        >
+          <Ionicons name="add" size={sizes.iconSmall} color={colors.action} />
+          <Text style={estilos.botonAgregarEjercicioTexto}>Agregar calentamiento</Text>
+        </Pressable>
+      ) : (
+        <View style={estilos.campo}>
+          <View style={estilos.ejerciciosHeader}>
+            <Text style={estilos.label}>Calentamiento</Text>
+            <Text style={estilos.ejerciciosContador}>
+              {calentamiento.length} {calentamiento.length === 1 ? 'ejercicio' : 'ejercicios'}
+            </Text>
+          </View>
+          <ListaEjercicios
+            ejercicios={calentamiento}
+            onMover={(idx, dir) => setCalentamiento((prev) => mover(prev, idx, dir))}
+            onQuitar={(idx) => setCalentamiento((prev) => prev.filter((_, i) => i !== idx))}
+          />
+          <Pressable
+            style={estilos.botonAgregarEjercicio}
+            onPress={() => abrirBuscador('calentamiento')}
+          >
+            <Ionicons name="add" size={sizes.iconSmall} color={colors.action} />
+            <Text style={estilos.botonAgregarEjercicioTexto}>Agregar ejercicio</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {/* Bloque principal */}
       <View style={estilos.campo}>
         <View style={estilos.ejerciciosHeader}>
-          <Text style={estilos.label}>Ejercicios en orden</Text>
+          <Text style={estilos.label}>
+            {calentamiento.length > 0 ? 'Principal' : 'Ejercicios en orden'}
+          </Text>
           <Text style={estilos.ejerciciosContador}>
             {ejercicios.length} {ejercicios.length === 1 ? 'ejercicio' : 'ejercicios'}
           </Text>
@@ -285,62 +401,16 @@ export default function NuevaRutinaGimnasio() {
             </Text>
           </View>
         ) : (
-          <View style={estilos.listaEjercicios}>
-            {ejercicios.map((ej, idx) => (
-              <View key={ej.id} style={estilos.itemEjercicio}>
-                <Text style={estilos.itemNumero}>{idx + 1}</Text>
-                <View style={estilos.itemInfo}>
-                  <Text style={estilos.itemNombre}>{ej.nombre}</Text>
-                  <Text style={estilos.itemGrupo}>{ej.grupo}</Text>
-                </View>
-
-                {/* Ordenar arriba / abajo */}
-                <View style={estilos.itemBotonesOrden}>
-                  <Pressable
-                    disabled={idx === 0}
-                    style={[estilos.botonFlecha, idx === 0 && estilos.botonFlechaDeshabilitado]}
-                    onPress={() => moverEjercicio(idx, 'arriba')}
-                    hitSlop={6}
-                  >
-                    <Ionicons
-                      name="chevron-up"
-                      size={18}
-                      color={idx === 0 ? colors.textMuted : colors.textPrimary}
-                    />
-                  </Pressable>
-                  <Pressable
-                    disabled={idx === ejercicios.length - 1}
-                    style={[
-                      estilos.botonFlecha,
-                      idx === ejercicios.length - 1 && estilos.botonFlechaDeshabilitado,
-                    ]}
-                    onPress={() => moverEjercicio(idx, 'abajo')}
-                    hitSlop={6}
-                  >
-                    <Ionicons
-                      name="chevron-down"
-                      size={18}
-                      color={idx === ejercicios.length - 1 ? colors.textMuted : colors.textPrimary}
-                    />
-                  </Pressable>
-                </View>
-
-                {/* Eliminar de la rutina */}
-                <Pressable
-                  style={estilos.botonEliminar}
-                  onPress={() => quitarEjercicio(idx)}
-                  hitSlop={8}
-                >
-                  <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
-                </Pressable>
-              </View>
-            ))}
-          </View>
+          <ListaEjercicios
+            ejercicios={ejercicios}
+            onMover={(idx, dir) => setEjercicios((prev) => mover(prev, idx, dir))}
+            onQuitar={(idx) => setEjercicios((prev) => prev.filter((_, i) => i !== idx))}
+          />
         )}
 
         <Pressable
           style={estilos.botonAgregarEjercicio}
-          onPress={() => setModalBuscador(true)}
+          onPress={() => abrirBuscador('principal')}
         >
           <Ionicons name="add" size={sizes.iconSmall} color={colors.action} />
           <Text style={estilos.botonAgregarEjercicioTexto}>Agregar ejercicio</Text>
@@ -380,7 +450,9 @@ export default function NuevaRutinaGimnasio() {
                 <Pressable onPress={() => setModalBuscador(false)} hitSlop={12}>
                   <Text style={estilos.flechaModal}>‹</Text>
                 </Pressable>
-                <Text style={estilos.modalTitulo}>Elegir ejercicio</Text>
+                <Text style={estilos.modalTitulo}>
+                  {destino === 'calentamiento' ? 'Calentamiento' : 'Elegir ejercicio'}
+                </Text>
               </View>
               <Pressable onPress={() => setCreandoEjercicio(true)} hitSlop={8}>
                 <Text style={estilos.enlaceCrear}>Crear nuevo</Text>
@@ -675,6 +747,14 @@ const estilos = StyleSheet.create({
     padding: spacing.xs,
   },
 
+  // Sin calentamiento: un enlace discreto, no una seccion vacia
+  botonSumarCalentamiento: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+  },
   botonAgregarEjercicio: {
     flexDirection: 'row',
     alignItems: 'center',

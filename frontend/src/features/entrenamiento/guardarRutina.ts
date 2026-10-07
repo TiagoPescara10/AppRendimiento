@@ -21,6 +21,8 @@ export interface SerieParaGuardar {
   repeticiones: number | null;
   duracionSeg?: number | null;
   pesoKg: number | null;
+  /** Va a la serie: las estadisticas la filtran aunque la rutina cambie despues. */
+  esCalentamiento?: boolean;
 }
 
 export interface DatosRutinaTerminada {
@@ -149,6 +151,7 @@ export async function guardarRutinaTerminada(
       repeticiones: s.repeticiones,
       duracion_seg: s.duracionSeg ?? null,
       peso_kg: s.pesoKg,
+      es_calentamiento: s.esCalentamiento ?? false,
     }));
 
     await agregarSeries(seriesFilas);

@@ -308,47 +308,40 @@ export interface SeriePreviaEjercicio {
 /**
  * Devuelve las series que el usuario hizo la ultima vez con este ejercicio.
  * Se busca la sesion mas reciente que contenga este ejercicio y se traen sus series ordenadas.
+ *
+ * Con `calentamiento` se mira solo ese bloque: la sentadilla del calentamiento
+ * no toma como referencia la del bloque principal, ni al reves.
  */
 export async function obtenerSeriesPreviasPorEjercicio(
   usuarioId: string,
   ejercicioId: string,
   sesionIdExcluir?: string,
+  calentamiento?: boolean,
 ): Promise<SeriePreviaEjercicio[]> {
   const db = getDb();
+  const filtroBloque = calentamiento === undefined ? '' : ' AND s.es_calentamiento = ?';
+  const paramBloque = calentamiento === undefined ? [] : [calentamiento ? 1 : 0];
+
   // Encontrar la sesion mas reciente donde se hizo este ejercicio (opcionalmente excluyendo una sesion)
-  const query = sesionIdExcluir
-    ? `SELECT s.sesion_id, e.fecha
-       FROM serie s
-       JOIN sesion_entrenamiento se ON se.id = s.sesion_id
-       JOIN evento e ON e.id = se.evento_id
-       WHERE e.usuario_id = ? AND s.ejercicio_id = ? AND se.id != ?
-       ORDER BY e.fecha_hora_inicio DESC
-       LIMIT 1`
-    : `SELECT s.sesion_id, e.fecha
-       FROM serie s
-       JOIN sesion_entrenamiento se ON se.id = s.sesion_id
-       JOIN evento e ON e.id = se.evento_id
-       WHERE e.usuario_id = ? AND s.ejercicio_id = ?
-       ORDER BY e.fecha_hora_inicio DESC
-       LIMIT 1`;
-
-  const params = sesionIdExcluir
-    ? [usuarioId, ejercicioId, sesionIdExcluir]
-    : [usuarioId, ejercicioId];
-
   const ultimaSesion = await db.getFirstAsync<{ sesion_id: string; fecha: string }>(
-    query,
-    params,
+    `SELECT s.sesion_id, e.fecha
+     FROM serie s
+     JOIN sesion_entrenamiento se ON se.id = s.sesion_id
+     JOIN evento e ON e.id = se.evento_id
+     WHERE e.usuario_id = ? AND s.ejercicio_id = ?${sesionIdExcluir ? ' AND se.id != ?' : ''}${filtroBloque}
+     ORDER BY e.fecha_hora_inicio DESC
+     LIMIT 1`,
+    [usuarioId, ejercicioId, ...(sesionIdExcluir ? [sesionIdExcluir] : []), ...paramBloque],
   );
 
   if (!ultimaSesion) return [];
 
   const series = await db.getAllAsync<Omit<SeriePreviaEjercicio, 'fecha'>>(
-    `SELECT orden, repeticiones, duracion_seg, peso_kg
-     FROM serie
-     WHERE sesion_id = ? AND ejercicio_id = ?
-     ORDER BY orden ASC`,
-    [ultimaSesion.sesion_id, ejercicioId],
+    `SELECT s.orden, s.repeticiones, s.duracion_seg, s.peso_kg
+     FROM serie s
+     WHERE s.sesion_id = ? AND s.ejercicio_id = ?${filtroBloque}
+     ORDER BY s.orden ASC`,
+    [ultimaSesion.sesion_id, ejercicioId, ...paramBloque],
   );
 
   return series.map((s) => ({
