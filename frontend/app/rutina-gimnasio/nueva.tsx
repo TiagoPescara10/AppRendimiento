@@ -37,7 +37,7 @@ import {
   crearEjercicio,
 } from '@/db/queries/ejercicios';
 import { randomUUID } from '@/db/sync/uuid';
-import type { EjercicioRow, GrupoMuscular } from '@/db/schema';
+import type { EjercicioRow, GrupoMuscular, MedidaEjercicio } from '@/db/schema';
 
 // ---------------------------------------------------------------------------
 // Constantes y helpers
@@ -51,6 +51,12 @@ const GRUPOS: { valor: GrupoMuscular | 'todos'; label: string }[] = [
   { valor: 'hombros', label: 'Hombros' },
   { valor: 'brazos', label: 'Brazos' },
   { valor: 'core', label: 'Core' },
+  { valor: 'cardio', label: 'Cardio' },
+];
+
+const MEDIDAS: { valor: MedidaEjercicio; label: string }[] = [
+  { valor: 'repeticiones', label: 'Repeticiones' },
+  { valor: 'tiempo', label: 'Tiempo' },
 ];
 
 export default function NuevaRutinaGimnasio() {
@@ -73,6 +79,7 @@ export default function NuevaRutinaGimnasio() {
   const [creandoEjercicio, setCreandoEjercicio] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [nuevoGrupo, setNuevoGrupo] = useState<GrupoMuscular>('pecho');
+  const [nuevaMedida, setNuevaMedida] = useState<MedidaEjercicio>('repeticiones');
 
   const [guardando, setGuardando] = useState(false);
   // Candado sincrono: el estado llega tarde y un doble toque creaba la rutina dos veces.
@@ -145,9 +152,11 @@ export default function NuevaRutinaGimnasio() {
         id: randomUUID(),
         nombre: n,
         grupo: nuevoGrupo,
+        medida: nuevaMedida,
       });
       setCreandoEjercicio(false);
       setNuevoNombre('');
+      setNuevaMedida('repeticiones');
       seleccionarEjercicio(creado);
     } catch (e) {
       console.error('Error al crear ejercicio:', e);
@@ -452,6 +461,28 @@ export default function NuevaRutinaGimnasio() {
                     </Pressable>
                   ))}
                 </ScrollView>
+                <View style={estilos.medidaFila}>
+                  {MEDIDAS.map((m) => (
+                    <Pressable
+                      key={m.valor}
+                      style={[
+                        estilos.miniChip,
+                        estilos.medidaChip,
+                        nuevaMedida === m.valor && estilos.miniChipActivo,
+                      ]}
+                      onPress={() => setNuevaMedida(m.valor)}
+                    >
+                      <Text
+                        style={[
+                          estilos.miniChipTexto,
+                          nuevaMedida === m.valor && estilos.miniChipTextoActivo,
+                        ]}
+                      >
+                        {m.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
                 <View style={estilos.nuevoBotones}>
                   <Pressable
                     style={estilos.nuevoBotonCancelar}
@@ -777,6 +808,14 @@ const estilos = StyleSheet.create({
     paddingVertical: spacing.xs,
     fontSize: fontSize.body,
     color: colors.textPrimary,
+  },
+  medidaFila: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  medidaChip: {
+    flex: 1,
+    alignItems: 'center',
   },
   miniChips: {
     flexDirection: 'row',

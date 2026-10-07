@@ -3130,6 +3130,30 @@ await prueba('el lote 2 de ejercicios se siembra sobre una base en lote 1 sin du
   await db.closeAsync();
 });
 
+await prueba('guardarRutinaTerminada() guarda series por tiempo y el Anterior las devuelve', async () => {
+  const db = await schema.initDb(join(tmp, 'v21-tiempo.db'));
+  await qPerfil.crearPerfil({ id: 'u-t', fecha_alta: '2026-09-01T10:00:00-03:00' });
+  const plancha = await db.getFirstAsync("SELECT id FROM ejercicio WHERE nombre = 'Plancha isometrica'");
+
+  await guardarRutina.guardarRutinaTerminada({
+    usuarioId: 'u-t',
+    inicio: new Date(2026, 8, 1, 18, 0, 0),
+    duracionRealSeg: 600,
+    series: [
+      { ejercicioId: plancha.id, repeticiones: null, duracionSeg: 60, pesoKg: null },
+      { ejercicioId: plancha.id, repeticiones: null, duracionSeg: 45, pesoKg: 10 },
+    ],
+  });
+
+  const previas = await qSesiones.obtenerSeriesPreviasPorEjercicio('u-t', plancha.id);
+  igual(previas.length, 2, 'dos series previas');
+  igual(previas[0].duracion_seg, 60, 'primera 1:00');
+  igual(previas[0].repeticiones, null, 'sin repeticiones');
+  igual(previas[1].duracion_seg, 45, 'segunda 0:45');
+  igual(previas[1].peso_kg, 10, 'con disco');
+  await schema.cerrarDb();
+});
+
 // --- salida ----------------------------------------------------------------
 
 rmSync(tmp, { recursive: true, force: true });

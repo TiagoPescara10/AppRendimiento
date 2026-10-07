@@ -15,9 +15,11 @@ import type { Intensidad, SesionEntrenamientoRow } from '../../db/schema';
 import { randomUUID } from '../../db/sync/uuid';
 import { aFechaLocal, aISOLocal } from '../../lib/fechas';
 
+/** repeticiones o duracionSeg, exactamente uno de los dos (CHECK de serie). */
 export interface SerieParaGuardar {
   ejercicioId: string;
-  repeticiones: number;
+  repeticiones: number | null;
+  duracionSeg?: number | null;
   pesoKg: number | null;
 }
 
@@ -145,6 +147,7 @@ export async function guardarRutinaTerminada(
       ejercicio_id: s.ejercicioId,
       orden: index,
       repeticiones: s.repeticiones,
+      duracion_seg: s.duracionSeg ?? null,
       peso_kg: s.pesoKg,
     }));
 

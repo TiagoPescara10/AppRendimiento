@@ -297,7 +297,10 @@ export async function obtenerResumenRutina(sesionId: string): Promise<ResumenRut
 
 export interface SeriePreviaEjercicio {
   orden: number;
-  repeticiones: number;
+  /** null en las series por tiempo. */
+  repeticiones: number | null;
+  /** null en las series por repeticiones. */
+  duracion_seg: number | null;
   peso_kg: number | null;
   fecha: string;
 }
@@ -340,12 +343,8 @@ export async function obtenerSeriesPreviasPorEjercicio(
 
   if (!ultimaSesion) return [];
 
-  const series = await db.getAllAsync<{
-    orden: number;
-    repeticiones: number;
-    peso_kg: number | null;
-  }>(
-    `SELECT orden, repeticiones, peso_kg
+  const series = await db.getAllAsync<Omit<SeriePreviaEjercicio, 'fecha'>>(
+    `SELECT orden, repeticiones, duracion_seg, peso_kg
      FROM serie
      WHERE sesion_id = ? AND ejercicio_id = ?
      ORDER BY orden ASC`,

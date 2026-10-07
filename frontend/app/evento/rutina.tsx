@@ -4,13 +4,17 @@
 // Disenada para operar con una sola mano y minima friccion durante el entrenamiento:
 // - Header con barra de progreso y boton "Finalizar".
 // - Lista de ejercicios en acordeon con separacion clara entre tarjetas.
-// - Tabla de series con columnas: Serie | Anterior | Kg | Reps | Estado.
+// - Tabla de series con columnas: Serie | Anterior | Kg | Reps | Estado. Los
+//   ejercicios por tiempo cambian Kg y Reps por una sola columna Tiempo (m:ss),
+//   con peso opcional detras de "+ peso".
 // - Series confirmadas protegidas como solo lectura (toque simple no las reabre;
 //   requiere onLongPress o tocar el icono de check para corregir).
 // - Fila en edicion con alto contraste (borde 2px action, fondo acentuado).
 // - Scroll suave automatico al saltar al siguiente ejercicio.
 // - Keypad numerico tactil integrado al pie con shadow.sheet y atajos rapidos (+1.25, +2.5, +5, Corporal).
-// - Sin cronometro, sin timers de descanso, sin minutos en pantalla.
+// - Sin timers de descanso. El unico cronometro es el de las series por tiempo
+//   (plancha, cardio): cuenta hacia arriba mientras se hace el ejercicio y al
+//   parar carga el tiempo en la serie. Ver useCronometroSerie.ts.
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
@@ -50,10 +54,17 @@ import { cargarNivel } from '@/features/nivel/api';
 import type { DatosNivel } from '@/features/nivel/api';
 import { GananciaXP } from '@/features/nivel/components/GananciaXP';
 import { textoSeriesEjercicio } from '@/lib/fuerza';
+import {
+  digitosDeDuracion,
+  leerDigitosTiempo,
+  MAX_DIGITOS_TIEMPO,
+  textoDuracion,
+} from '@/lib/duracion';
+import { useCronometroSerie } from '@/features/entrenamiento/useCronometroSerie';
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
 import { randomUUID } from '@/db/sync/uuid';
-import type { EjercicioRow, GrupoMuscular } from '@/db/schema';
+import type { EjercicioRow, GrupoMuscular, MedidaEjercicio } from '@/db/schema';
 
 // ---------------------------------------------------------------------------
 // Modelos locales
@@ -63,25 +74,70 @@ interface SerieBorrador {
   id: string;
   repeticiones: number;
   pesoKg: number | null;
+  /** Solo en ejercicios por tiempo. null mientras no haya un tiempo valido. */
+  duracionSeg: number | null;
   confirmada: boolean;
   textoRepes: string;
   textoPeso: string;
+  /** Digitos crudos del campo Tiempo: "130" se lee 1:30. */
+  textoTiempo: string;
+  /** En una serie por tiempo, si se toco "+ peso". En las de reps no se usa. */
+  conPeso: boolean;
 }
 
 function crearSerieBorrador(
   repeticiones = 10,
   pesoKg: number | null = null,
   confirmada = false,
+  duracionSeg: number | null = null,
 ): SerieBorrador {
   return {
     id: randomUUID(),
     repeticiones,
     pesoKg,
+    duracionSeg,
     confirmada,
     textoRepes: String(repeticiones),
     textoPeso: pesoKg !== null && pesoKg > 0 ? String(pesoKg) : '',
+    textoTiempo: duracionSeg ? digitosDeDuracion(duracionSeg) : '',
+    conPeso: pesoKg !== null && pesoKg > 0,
   };
 }
+
+/** La serie i de la sesion arranca con lo que se hizo la vez anterior. */
+function serieDesdePrevia(previa: SeriePreviaEjercicio | undefined): SerieBorrador {
+  if (!previa) return crearSerieBorrador(10, null, false);
+  return crearSerieBorrador(previa.repeticiones ?? 10, previa.peso_kg, false, previa.duracion_seg);
+}
+
+/** La nueva serie copia a la ultima del ejercicio. */
+function serieComoLaUltima(ultima: SerieBorrador | undefined): SerieBorrador {
+  if (!ultima) return crearSerieBorrador(10, null, false);
+  const nueva = crearSerieBorrador(ultima.repeticiones, ultima.pesoKg, false, ultima.duracionSeg);
+  return { ...nueva, conPeso: ultima.conPeso };
+}
+
+function esPorTiempo(ejercicio: EjercicioRow): boolean {
+  return ejercicio.medida === 'tiempo';
+}
+
+/** Una serie por tiempo sin tiempo valido no se puede confirmar ni guardar. */
+function tiempoListo(s: SerieBorrador): boolean {
+  return s.duracionSeg !== null && s.duracionSeg > 0 && leerDigitosTiempo(s.textoTiempo).valido;
+}
+
+/**
+ * Las series que se guardan al finalizar: las de reps con repeticiones y las
+ * por tiempo con un tiempo valido. Igual que antes, entran tambien las que
+ * quedaron sin confirmar si tienen un valor (el aviso de pendientes lo dice).
+ */
+function seriesParaGuardar(item: EjercicioEnSesion): SerieBorrador[] {
+  return esPorTiempo(item.ejercicio)
+    ? item.series.filter(tiempoListo)
+    : item.series.filter((s) => s.repeticiones > 0);
+}
+
+type Campo = 'kg' | 'reps' | 'tiempo';
 
 interface EjercicioEnSesion {
   ejercicio: EjercicioRow;
@@ -101,6 +157,12 @@ const GRUPOS: { valor: GrupoMuscular | 'todos'; label: string }[] = [
   { valor: 'hombros', label: 'Hombros' },
   { valor: 'brazos', label: 'Brazos' },
   { valor: 'core', label: 'Core' },
+  { valor: 'cardio', label: 'Cardio' },
+];
+
+const MEDIDAS: { valor: MedidaEjercicio; label: string }[] = [
+  { valor: 'repeticiones', label: 'Repeticiones' },
+  { valor: 'tiempo', label: 'Tiempo' },
 ];
 
 function esEjercicioCorporal(ejercicio: EjercicioRow, previas?: SeriePreviaEjercicio[]): boolean {
@@ -116,6 +178,12 @@ function esEjercicioCorporal(ejercicio: EjercicioRow, previas?: SeriePreviaEjerc
     n.includes('abdominal') ||
     n.includes('hiperextension')
   );
+}
+
+/** En que campo arranca el teclado al abrir una serie de este ejercicio. */
+function campoInicial(ejercicio: EjercicioRow, previas?: SeriePreviaEjercicio[]): Campo {
+  if (esPorTiempo(ejercicio)) return 'tiempo';
+  return esEjercicioCorporal(ejercicio, previas) ? 'reps' : 'kg';
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +216,8 @@ export default function SesionRutina() {
   // Acordeon y seleccion de serie activa para el keypad
   const [ejercicioExpandidoId, setEjercicioExpandidoId] = useState<string | null>(null);
   const [serieActiva, setSerieActiva] = useState<SeleccionSerie | null>(null);
-  const [campoActivo, setCampoActivo] = useState<'kg' | 'reps'>('kg');
+  const [campoActivo, setCampoActivo] = useState<Campo>('kg');
+  const cronometro = useCronometroSerie();
 
   // Modal buscador de ejercicios del catalogo
   const [modalBuscador, setModalBuscador] = useState(false);
@@ -159,6 +228,7 @@ export default function SesionRutina() {
   // Modal alta de nuevo ejercicio
   const [nuevoNombre, setNuevoNombre] = useState('');
   const [nuevoGrupo, setNuevoGrupo] = useState<GrupoMuscular>('pecho');
+  const [nuevaMedida, setNuevaMedida] = useState<MedidaEjercicio>('repeticiones');
   const [creandoEjercicio, setCreandoEjercicio] = useState(false);
 
   const [guardando, setGuardando] = useState(false);
@@ -207,12 +277,7 @@ export default function SesionRutina() {
             const series: SerieBorrador[] = [];
 
             for (let i = 0; i < cantSeries; i++) {
-              const pSerie = previas[i];
-              if (pSerie) {
-                series.push(crearSerieBorrador(pSerie.repeticiones, pSerie.peso_kg, false));
-              } else {
-                series.push(crearSerieBorrador(10, null, false));
-              }
+              series.push(serieDesdePrevia(previas[i]));
             }
 
             return { ejercicio: ej, series };
@@ -229,8 +294,7 @@ export default function SesionRutina() {
                 ejercicioId: primerEj.ejercicio.id,
                 serieId: primerEj.series[0].id,
               });
-              const esCorp = esEjercicioCorporal(primerEj.ejercicio, mapa.get(primerEj.ejercicio.id));
-              setCampoActivo(esCorp ? 'reps' : 'kg');
+              setCampoActivo(campoInicial(primerEj.ejercicio, mapa.get(primerEj.ejercicio.id)));
             }
           }
         }
@@ -288,12 +352,7 @@ export default function SesionRutina() {
     const cantSeries = Math.max(3, previas.length);
     const nuevasSeries: SerieBorrador[] = [];
     for (let i = 0; i < cantSeries; i++) {
-      const p = previas[i];
-      if (p) {
-        nuevasSeries.push(crearSerieBorrador(p.repeticiones, p.peso_kg, false));
-      } else {
-        nuevasSeries.push(crearSerieBorrador(10, null, false));
-      }
+      nuevasSeries.push(serieDesdePrevia(previas[i]));
     }
 
     const nuevoItem: EjercicioEnSesion = {
@@ -305,7 +364,7 @@ export default function SesionRutina() {
     setEjercicioExpandidoId(ej.id);
     if (nuevasSeries.length > 0) {
       setSerieActiva({ ejercicioId: ej.id, serieId: nuevasSeries[0].id });
-      setCampoActivo(esEjercicioCorporal(ej, previas) ? 'reps' : 'kg');
+      setCampoActivo(campoInicial(ej, previas));
     }
   };
 
@@ -322,8 +381,10 @@ export default function SesionRutina() {
         id: randomUUID(),
         nombre,
         grupo: nuevoGrupo,
+        medida: nuevaMedida,
       });
       setNuevoNombre('');
+      setNuevaMedida('repeticiones');
       setCreandoEjercicio(false);
       await seleccionarEjercicio(creado);
     } catch (e) {
@@ -345,8 +406,7 @@ export default function SesionRutina() {
         const pendiente = item.series.find((s) => !s.confirmada) ?? null;
         if (pendiente) {
           setSerieActiva({ ejercicioId, serieId: pendiente.id });
-          const esCorp = esEjercicioCorporal(item.ejercicio, referenciasPrevias.get(ejercicioId));
-          setCampoActivo(esCorp ? 'reps' : 'kg');
+          setCampoActivo(campoInicial(item.ejercicio, referenciasPrevias.get(ejercicioId)));
         } else {
           // Si todas estan confirmadas, no abrir el keypad hasta que toque explicitamente
           setSerieActiva(null);
@@ -361,12 +421,7 @@ export default function SesionRutina() {
     setEjerciciosSesion((prev) =>
       prev.map((item) => {
         if (item.ejercicio.id !== ejercicioId) return item;
-        const ultima = item.series[item.series.length - 1];
-        const nueva = crearSerieBorrador(
-          ultima ? ultima.repeticiones : 10,
-          ultima ? ultima.pesoKg : null,
-          false,
-        );
+        const nueva = serieComoLaUltima(item.series[item.series.length - 1]);
         nuevaId = nueva.id;
         return { ...item, series: [...item.series, nueva] };
       }),
@@ -375,8 +430,7 @@ export default function SesionRutina() {
       setSerieActiva({ ejercicioId, serieId: nuevaId });
       const item = ejerciciosSesion.find((e) => e.ejercicio.id === ejercicioId);
       if (item) {
-        const esCorp = esEjercicioCorporal(item.ejercicio, referenciasPrevias.get(ejercicioId));
-        setCampoActivo(esCorp ? 'reps' : 'kg');
+        setCampoActivo(campoInicial(item.ejercicio, referenciasPrevias.get(ejercicioId)));
       }
     }
   };
@@ -413,6 +467,18 @@ export default function SesionRutina() {
   // Si la serie en edicion ya estaba confirmada (modo correccion)
   const esModoCorreccion = !!serieActivaObj?.confirmada;
 
+  const activoPorTiempo = !!itemActivo && esPorTiempo(itemActivo.ejercicio);
+  const tiempoInvalido =
+    activoPorTiempo && !!serieActivaObj && !leerDigitosTiempo(serieActivaObj.textoTiempo).valido;
+  // Por tiempo: sin un tiempo valido no hay serie, y con el cronometro andando
+  // se confirma con Parar
+  const puedeConfirmar =
+    !activoPorTiempo || (!!serieActivaObj && tiempoListo(serieActivaObj) && !cronometro.corriendo);
+  // El tiempo de la misma serie la vez anterior, para mostrarlo como objetivo
+  const objetivoSeg = activoPorTiempo
+    ? referenciasPrevias.get(itemActivo.ejercicio.id)?.[serieActivaNumero - 1]?.duracion_seg ?? null
+    : null;
+
   // Modificar valores de la serie activa
   const actualizarSerieActiva = (
     updater: (s: SerieBorrador) => Partial<SerieBorrador>,
@@ -435,9 +501,18 @@ export default function SesionRutina() {
 
   // Digitar en el keypad
   const handleDigito = (digito: string) => {
-    if (!serieActivaObj) return;
+    if (!serieActivaObj || cronometro.corriendo) return;
 
-    if (campoActivo === 'kg') {
+    if (campoActivo === 'tiempo') {
+      if (digito === '.') return;
+      // Sin ceros a la izquierda: "0" solo no es nada y "0130" es "130"
+      const nuevoTexto = (serieActivaObj.textoTiempo + digito).replace(/^0+/, '');
+      if (nuevoTexto.length > MAX_DIGITOS_TIEMPO) return;
+      actualizarSerieActiva(() => ({
+        textoTiempo: nuevoTexto,
+        duracionSeg: leerDigitosTiempo(nuevoTexto).seg,
+      }));
+    } else if (campoActivo === 'kg') {
       let nuevoTexto = (serieActivaObj.textoPeso || '') + digito;
       if (nuevoTexto.startsWith('.')) nuevoTexto = '0' + nuevoTexto;
       if ((nuevoTexto.match(/\./g) || []).length > 1) return;
@@ -463,9 +538,15 @@ export default function SesionRutina() {
 
   // Borrar ultimo digito
   const handleBorrar = () => {
-    if (!serieActivaObj) return;
+    if (!serieActivaObj || cronometro.corriendo) return;
 
-    if (campoActivo === 'kg') {
+    if (campoActivo === 'tiempo') {
+      const nuevoTexto = serieActivaObj.textoTiempo.slice(0, -1);
+      actualizarSerieActiva(() => ({
+        textoTiempo: nuevoTexto,
+        duracionSeg: leerDigitosTiempo(nuevoTexto).seg,
+      }));
+    } else if (campoActivo === 'kg') {
       const actual = serieActivaObj.textoPeso || '';
       const nuevoTexto = actual.slice(0, -1);
       const parsed = parseFloat(nuevoTexto);
@@ -496,24 +577,59 @@ export default function SesionRutina() {
     }));
   };
 
-  // Atajo para peso corporal
+  // Atajo para peso corporal. En una serie por tiempo es "Sin peso": saca el
+  // campo de kg y vuelve al tiempo.
   const handleCorporal = () => {
     if (!serieActivaObj) return;
+    const porTiempo = !!itemActivo && esPorTiempo(itemActivo.ejercicio);
     actualizarSerieActiva(() => ({
       pesoKg: null,
       textoPeso: '',
+      conPeso: false,
     }));
-    setCampoActivo('reps');
+    setCampoActivo(porTiempo ? 'tiempo' : 'reps');
   };
 
-  // Confirmar serie activa con auto-avance o guardar correccion
-  const handleConfirmarSerie = () => {
+  // "+ peso" en una serie por tiempo: aparece el campo de kg
+  const handleAgregarPeso = () => {
+    if (!serieActivaObj || cronometro.corriendo) return;
+    actualizarSerieActiva(() => ({ conPeso: true }));
+    setCampoActivo('kg');
+  };
+
+  // Si cambia la serie activa con el cronometro andando (se toco otra fila o
+  // se cerro el ejercicio), la medicion se abandona: no hay a que serie cargarla.
+  const { corriendo: cronoCorriendo, cancelar: cancelarCrono } = cronometro;
+  useEffect(() => {
+    if (cronoCorriendo) cancelarCrono();
+    // Solo al cambiar de serie, no cuando arranca el cronometro
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serieActiva?.serieId]);
+
+  // Parar el cronometro carga el tiempo en la serie y la confirma
+  const handleIniciarParar = () => {
+    if (!serieActivaObj) return;
+    if (!cronometro.corriendo) {
+      setCampoActivo('tiempo');
+      cronometro.iniciar();
+      return;
+    }
+    const seg = Math.min(cronometro.parar(), 99 * 60 + 59);
+    handleConfirmarSerie({ duracionSeg: seg, textoTiempo: digitosDeDuracion(seg) });
+  };
+
+  // Confirmar serie activa con auto-avance o guardar correccion. `valores`
+  // trae lo que cargo el cronometro, que todavia no esta en el estado.
+  const handleConfirmarSerie = (valores?: Partial<SerieBorrador>) => {
     if (!serieActiva || !itemActivo || !serieActivaObj) return;
+    const porTiempo = esPorTiempo(itemActivo.ejercicio);
+    if (porTiempo && !tiempoListo({ ...serieActivaObj, ...valores })) return;
 
     const estabaConfirmada = serieActivaObj.confirmada;
 
     // Actualizar y confirmar la serie
     actualizarSerieActiva((s) => ({
+      ...valores,
       confirmada: true,
       repeticiones: s.repeticiones > 0 ? s.repeticiones : 10,
     }));
@@ -522,14 +638,14 @@ export default function SesionRutina() {
     // no avanzar ciegamente: buscar si queda alguna serie pendiente real
     if (estabaConfirmada) {
       // Buscar siguiente serie pendiente en este u otro ejercicio
-      let siguientePendiente: { ejId: string; serieId: string; esCorp: boolean } | null = null;
+      let siguientePendiente: { ejId: string; serieId: string; campo: Campo } | null = null;
       for (const ejItem of ejerciciosSesion) {
         const pendiente = ejItem.series.find((s) => !s.confirmada && s.id !== serieActiva.serieId);
         if (pendiente) {
           siguientePendiente = {
             ejId: ejItem.ejercicio.id,
             serieId: pendiente.id,
-            esCorp: esEjercicioCorporal(ejItem.ejercicio, referenciasPrevias.get(ejItem.ejercicio.id)),
+            campo: campoInicial(ejItem.ejercicio, referenciasPrevias.get(ejItem.ejercicio.id)),
           };
           break;
         }
@@ -538,7 +654,7 @@ export default function SesionRutina() {
       if (siguientePendiente) {
         setEjercicioExpandidoId(siguientePendiente.ejId);
         setSerieActiva({ ejercicioId: siguientePendiente.ejId, serieId: siguientePendiente.serieId });
-        setCampoActivo(siguientePendiente.esCorp ? 'reps' : 'kg');
+        setCampoActivo(siguientePendiente.campo);
       } else {
         // No hay pendientes: cerrar keypad limpiamente
         setSerieActiva(null);
@@ -560,11 +676,7 @@ export default function SesionRutina() {
         ejercicioId: serieActiva.ejercicioId,
         serieId: prox.id,
       });
-      const esCorp = esEjercicioCorporal(
-        itemActivo.ejercicio,
-        referenciasPrevias.get(itemActivo.ejercicio.id),
-      );
-      setCampoActivo(esCorp ? 'reps' : 'kg');
+      setCampoActivo(campoInicial(itemActivo.ejercicio, referenciasPrevias.get(itemActivo.ejercicio.id)));
       return;
     }
 
@@ -594,11 +706,7 @@ export default function SesionRutina() {
         ejercicioId: proxEjId,
         serieId: primeraPendiente.id,
       });
-      const esCorp = esEjercicioCorporal(
-        proxEjercicio.ejercicio,
-        referenciasPrevias.get(proxEjId),
-      );
-      setCampoActivo(esCorp ? 'reps' : 'kg');
+      setCampoActivo(campoInicial(proxEjercicio.ejercicio, referenciasPrevias.get(proxEjId)));
 
       // Scroll suave hacia el nuevo ejercicio recien desplegado
       setTimeout(() => {
@@ -623,13 +731,20 @@ export default function SesionRutina() {
     if (guardando) return;
 
     const listaSeriesPlana = ejerciciosSesion.flatMap((item) =>
-      item.series
-        .filter((s) => s.repeticiones > 0)
-        .map((s) => ({
-          ejercicioId: item.ejercicio.id,
-          repeticiones: s.repeticiones,
-          pesoKg: s.pesoKg,
-        })),
+      seriesParaGuardar(item).map((s) =>
+        esPorTiempo(item.ejercicio)
+          ? {
+              ejercicioId: item.ejercicio.id,
+              repeticiones: null,
+              duracionSeg: s.duracionSeg,
+              pesoKg: s.conPeso ? s.pesoKg : null,
+            }
+          : {
+              ejercicioId: item.ejercicio.id,
+              repeticiones: s.repeticiones,
+              pesoKg: s.pesoKg,
+            },
+      ),
     );
 
     if (listaSeriesPlana.length === 0) {
@@ -665,7 +780,13 @@ export default function SesionRutina() {
             .map((item) => ({
               id: item.ejercicio.id,
               nombre: item.ejercicio.nombre,
-              detalle: textoSeriesEjercicio(item.series.filter((s) => s.repeticiones > 0)),
+              detalle: textoSeriesEjercicio(
+                seriesParaGuardar(item).map((s) =>
+                  esPorTiempo(item.ejercicio)
+                    ? { repeticiones: null, duracionSeg: s.duracionSeg, pesoKg: s.conPeso ? s.pesoKg : null }
+                    : { repeticiones: s.repeticiones, pesoKg: s.pesoKg },
+                ),
+              ),
             }))
             .filter((e) => e.detalle !== ''),
         );
@@ -796,6 +917,7 @@ export default function SesionRutina() {
             const previas = referenciasPrevias.get(ejId) ?? [];
             const pendientes = item.series.filter((s) => !s.confirmada).length;
             const completado = item.series.length > 0 && pendientes === 0;
+            const porTiempo = esPorTiempo(item.ejercicio);
 
             return (
               <View
@@ -843,8 +965,14 @@ export default function SesionRutina() {
                     <View style={estilos.tablaEncabezado}>
                       <Text style={[estilos.tablaTh, estilos.colSerie]}>SERIE</Text>
                       <Text style={[estilos.tablaTh, estilos.colAnterior]}>ANTERIOR</Text>
-                      <Text style={[estilos.tablaTh, estilos.colKg]}>KG</Text>
-                      <Text style={[estilos.tablaTh, estilos.colReps]}>REPS</Text>
+                      {porTiempo ? (
+                        <Text style={[estilos.tablaTh, estilos.colTiempo]}>TIEMPO</Text>
+                      ) : (
+                        <>
+                          <Text style={[estilos.tablaTh, estilos.colKg]}>KG</Text>
+                          <Text style={[estilos.tablaTh, estilos.colReps]}>REPS</Text>
+                        </>
+                      )}
                       <Text style={[estilos.tablaTh, estilos.colEstado]}>ESTADO</Text>
                     </View>
 
@@ -856,7 +984,12 @@ export default function SesionRutina() {
                         const prev = previas[sIdx];
 
                         let textoAnterior = '—';
-                        if (prev) {
+                        if (prev?.duracion_seg != null) {
+                          textoAnterior =
+                            prev.peso_kg !== null && prev.peso_kg > 0
+                              ? `${textoDuracion(prev.duracion_seg)} · ${prev.peso_kg}`
+                              : textoDuracion(prev.duracion_seg);
+                        } else if (prev) {
                           if (prev.peso_kg !== null && prev.peso_kg > 0) {
                             textoAnterior = `${prev.peso_kg} × ${prev.repeticiones}`;
                           } else {
@@ -865,29 +998,19 @@ export default function SesionRutina() {
                         }
 
                         // Toque en fila: si esta confirmada, es solo lectura
-                        const handlePressFila = (campoObjetivo?: 'kg' | 'reps') => {
+                        const handlePressFila = (campoObjetivo?: Campo) => {
                           if (s.confirmada) {
                             // Serie confirmada: no hace nada en toque simple para evitar ediciones accidentales
                             return;
                           }
                           setSerieActiva({ ejercicioId: ejId, serieId: s.id });
-                          if (campoObjetivo) {
-                            setCampoActivo(campoObjetivo);
-                          } else if (esEjercicioCorporal(item.ejercicio, previas)) {
-                            setCampoActivo('reps');
-                          } else {
-                            setCampoActivo('kg');
-                          }
+                          setCampoActivo(campoObjetivo ?? campoInicial(item.ejercicio, previas));
                         };
 
                         // Toque largo en serie confirmada: permite corregir
                         const handleLongPressConfirmada = () => {
                           setSerieActiva({ ejercicioId: ejId, serieId: s.id });
-                          if (esEjercicioCorporal(item.ejercicio, previas)) {
-                            setCampoActivo('reps');
-                          } else {
-                            setCampoActivo('kg');
-                          }
+                          setCampoActivo(campoInicial(item.ejercicio, previas));
                         };
 
                         // Toque en icono de estado
@@ -906,11 +1029,11 @@ export default function SesionRutina() {
                                 };
                               }),
                             );
-                            if (esEjercicioCorporal(item.ejercicio, previas)) {
-                              setCampoActivo('reps');
-                            } else {
-                              setCampoActivo('kg');
-                            }
+                            setCampoActivo(campoInicial(item.ejercicio, previas));
+                          } else if (porTiempo && !tiempoListo(s)) {
+                            // Por tiempo y sin tiempo: no hay nada que confirmar, se abre para cargarlo
+                            setSerieActiva({ ejercicioId: ejId, serieId: s.id });
+                            setCampoActivo('tiempo');
                           } else {
                             // Confirmar de inmediato con los valores actuales
                             setEjerciciosSesion((prevArr) =>
@@ -958,6 +1081,32 @@ export default function SesionRutina() {
                               </Text>
                             </View>
 
+                            {porTiempo ? (
+                              <Pressable
+                                style={[
+                                  estilos.colTiempo,
+                                  estilos.celdaInput,
+                                  s.confirmada && estilos.celdaInputConfirmada,
+                                  esActiva && estilos.celdaInputEnfocada,
+                                ]}
+                                onPress={() => handlePressFila('tiempo')}
+                                onLongPress={s.confirmada ? handleLongPressConfirmada : undefined}
+                              >
+                                <Text
+                                  style={[
+                                    estilos.valorTexto,
+                                    esActiva && estilos.valorTextoActivo,
+                                    !leerDigitosTiempo(s.textoTiempo).valido && estilos.valorTextoInvalido,
+                                    s.textoTiempo === '' && estilos.valorTextoCorporal,
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {s.textoTiempo === '' ? '—' : leerDigitosTiempo(s.textoTiempo).texto}
+                                  {s.conPeso && s.pesoKg !== null && s.pesoKg > 0 ? ` · ${s.pesoKg} kg` : ''}
+                                </Text>
+                              </Pressable>
+                            ) : (
+                            <>
                             {/* Columna Kg */}
                             <Pressable
                               style={[
@@ -1001,6 +1150,8 @@ export default function SesionRutina() {
                                 {s.repeticiones}
                               </Text>
                             </Pressable>
+                            </>
+                            )}
 
                             {/* Columna Estado */}
                             <Pressable
@@ -1066,53 +1217,96 @@ export default function SesionRutina() {
                   ? `Corrigiendo: S${serieActivaNumero} · ${itemActivo?.ejercicio.nombre}`
                   : `Serie ${serieActivaNumero} · ${itemActivo?.ejercicio.nombre}`}
               </Text>
-              <Text style={estilos.keypadContextoSub}>
+              <Text
+                style={[estilos.keypadContextoSub, tiempoInvalido && estilos.keypadContextoInvalido]}
+              >
                 {esModoCorreccion
                   ? 'Modificando serie completada'
+                  : tiempoInvalido
+                  ? 'Los segundos van hasta 59'
+                  : campoActivo === 'tiempo'
+                  ? 'Editando tiempo (m:ss)'
                   : campoActivo === 'kg'
                   ? 'Editando peso en kg'
                   : 'Editando repeticiones'}
               </Text>
             </View>
 
-            {/* Switch Kg / Reps */}
-            <View style={estilos.switchPill}>
+            {activoPorTiempo && !serieActivaObj?.conPeso ? (
+              // Por tiempo y sin peso: el kg no aparece hasta que se pide
               <Pressable
-                style={[
-                  estilos.switchBoton,
-                  campoActivo === 'kg' && estilos.switchBotonActivo,
-                ]}
-                onPress={() => setCampoActivo('kg')}
+                style={[estilos.botonMasPeso, cronometro.corriendo && estilos.deshabilitado]}
+                onPress={handleAgregarPeso}
+                disabled={cronometro.corriendo}
+                hitSlop={8}
               >
-                <Text
-                  style={[
-                    estilos.switchBotonTexto,
-                    campoActivo === 'kg' && estilos.switchBotonTextoActivo,
-                  ]}
-                >
-                  Kg
-                </Text>
+                <Text style={estilos.botonMasPesoTexto}>+ peso</Text>
               </Pressable>
-              <Pressable
-                style={[
-                  estilos.switchBoton,
-                  campoActivo === 'reps' && estilos.switchBotonActivo,
-                ]}
-                onPress={() => setCampoActivo('reps')}
-              >
-                <Text
-                  style={[
-                    estilos.switchBotonTexto,
-                    campoActivo === 'reps' && estilos.switchBotonTextoActivo,
-                  ]}
-                >
-                  Reps
-                </Text>
-              </Pressable>
-            </View>
+            ) : (
+              /* Switch Kg / Reps, o Tiempo / Kg en una serie por tiempo con peso */
+              <View style={estilos.switchPill}>
+                {(activoPorTiempo ? (['tiempo', 'kg'] as const) : (['kg', 'reps'] as const)).map(
+                  (campo) => (
+                    <Pressable
+                      key={campo}
+                      style={[
+                        estilos.switchBoton,
+                        campoActivo === campo && estilos.switchBotonActivo,
+                      ]}
+                      onPress={() => setCampoActivo(campo)}
+                      disabled={cronometro.corriendo}
+                    >
+                      <Text
+                        style={[
+                          estilos.switchBotonTexto,
+                          campoActivo === campo && estilos.switchBotonTextoActivo,
+                        ]}
+                      >
+                        {campo === 'kg' ? 'Kg' : campo === 'reps' ? 'Reps' : 'Tiempo'}
+                      </Text>
+                    </Pressable>
+                  ),
+                )}
+              </View>
+            )}
           </View>
 
-          {/* Atajos rapidos de peso (+1.25, +2.5, +5, Corporal) */}
+          {campoActivo === 'tiempo' ? (
+            /* Cronometro de la serie: cuenta hacia arriba y no corta solo */
+            <View style={estilos.keypadFilaCronometro}>
+              <Pressable
+                style={({ pressed }) => [
+                  estilos.botonCronometro,
+                  cronometro.corriendo && estilos.botonCronometroParar,
+                  pressed && estilos.botonConfirmarPresionado,
+                ]}
+                onPress={handleIniciarParar}
+              >
+                <Ionicons
+                  name={cronometro.corriendo ? 'stop' : 'play'}
+                  size={16}
+                  color={colors.textOnAction}
+                />
+                <Text style={estilos.botonCronometroTexto}>
+                  {cronometro.corriendo ? 'Parar' : 'Iniciar'}
+                </Text>
+              </Pressable>
+              <Text
+                style={[
+                  estilos.cronometroValor,
+                  !cronometro.corriendo && estilos.cronometroValorQuieto,
+                ]}
+              >
+                {cronometro.corriendo
+                  ? textoDuracion(cronometro.segundos)
+                  : leerDigitosTiempo(serieActivaObj?.textoTiempo ?? '').texto}
+              </Text>
+              {objetivoSeg !== null && (
+                <Text style={estilos.cronometroObjetivo}>Ant. {textoDuracion(objetivoSeg)}</Text>
+              )}
+            </View>
+          ) : (
+          /* Atajos rapidos de peso (+1.25, +2.5, +5, Corporal / Sin peso) */
           <View style={estilos.keypadFilaAtajos}>
             <Pressable
               style={estilos.atajoBoton}
@@ -1135,23 +1329,24 @@ export default function SesionRutina() {
             <Pressable
               style={[
                 estilos.atajoBoton,
-                serieActivaObj?.pesoKg === null && estilos.atajoBotonCorporalActivo,
+                !activoPorTiempo && serieActivaObj?.pesoKg === null && estilos.atajoBotonCorporalActivo,
               ]}
               onPress={handleCorporal}
             >
               <Text
                 style={[
                   estilos.atajoTexto,
-                  serieActivaObj?.pesoKg === null && estilos.atajoTextoCorporalActivo,
+                  !activoPorTiempo && serieActivaObj?.pesoKg === null && estilos.atajoTextoCorporalActivo,
                 ]}
               >
-                Corporal
+                {activoPorTiempo ? 'Sin peso' : 'Corporal'}
               </Text>
             </Pressable>
           </View>
+          )}
 
           {/* Grilla 3x4 del teclado numerico */}
-          <View style={estilos.tecladoGrilla}>
+          <View style={[estilos.tecladoGrilla, cronometro.corriendo && estilos.deshabilitado]}>
             <View style={estilos.tecladoFila}>
               {['1', '2', '3'].map((d) => (
                 <Pressable
@@ -1187,8 +1382,13 @@ export default function SesionRutina() {
             </View>
             <View style={estilos.tecladoFila}>
               <Pressable
-                style={({ pressed }) => [estilos.tecla, pressed && estilos.teclaPresionada]}
+                style={({ pressed }) => [
+                  estilos.tecla,
+                  pressed && estilos.teclaPresionada,
+                  (campoActivo === 'tiempo' || cronometro.corriendo) && estilos.deshabilitado,
+                ]}
                 onPress={() => handleDigito('.')}
+                disabled={campoActivo === 'tiempo' || cronometro.corriendo}
               >
                 <Text style={estilos.teclaTexto}>.</Text>
               </Pressable>
@@ -1216,8 +1416,10 @@ export default function SesionRutina() {
             style={({ pressed }) => [
               estilos.botonConfirmar,
               pressed && estilos.botonConfirmarPresionado,
+              !puedeConfirmar && estilos.botonConfirmarDeshabilitado,
             ]}
-            onPress={handleConfirmarSerie}
+            onPress={() => handleConfirmarSerie()}
+            disabled={!puedeConfirmar}
           >
             <Text style={estilos.botonConfirmarTexto}>
               {esModoCorreccion ? 'Guardar corrección' : 'Confirmar serie'}
@@ -1341,6 +1543,28 @@ export default function SesionRutina() {
                     </Pressable>
                   ))}
                 </ScrollView>
+                <View style={estilos.medidaFila}>
+                  {MEDIDAS.map((m) => (
+                    <Pressable
+                      key={m.valor}
+                      style={[
+                        estilos.miniChip,
+                        estilos.medidaChip,
+                        nuevaMedida === m.valor && estilos.miniChipActivo,
+                      ]}
+                      onPress={() => setNuevaMedida(m.valor)}
+                    >
+                      <Text
+                        style={[
+                          estilos.miniChipTexto,
+                          nuevaMedida === m.valor && estilos.miniChipTextoActivo,
+                        ]}
+                      >
+                        {m.label}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
                 <View style={estilos.nuevoBotones}>
                   <Pressable
                     style={estilos.nuevoBotonCancelar}
@@ -1616,6 +1840,12 @@ const estilos = StyleSheet.create({
     width: 60,
     marginRight: spacing.xs,
   },
+  // Ocupa el lugar de Kg + Reps en los ejercicios por tiempo
+  colTiempo: {
+    flex: 1,
+    minWidth: 72 + 60 + spacing.xs,
+    marginRight: spacing.xs,
+  },
   colEstado: {
     width: 38,
     alignItems: 'center',
@@ -1684,6 +1914,9 @@ const estilos = StyleSheet.create({
   valorTextoActivo: {
     fontWeight: '700',
     color: colors.textPrimary,
+  },
+  valorTextoInvalido: {
+    color: colors.danger,
   },
   valorTextoCorporal: {
     fontSize: fontSize.caption,
@@ -1800,6 +2033,26 @@ const estilos = StyleSheet.create({
     fontSize: fontSize.caption,
     color: colors.textSecondary,
   },
+  keypadContextoInvalido: {
+    color: colors.danger,
+    fontWeight: '600',
+  },
+  botonMasPeso: {
+    paddingVertical: 5,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  botonMasPesoTexto: {
+    fontSize: fontSize.small,
+    fontWeight: '600',
+    color: colors.action,
+  },
+  deshabilitado: {
+    opacity: 0.4,
+  },
   switchPill: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceAlt,
@@ -1853,6 +2106,49 @@ const estilos = StyleSheet.create({
     color: colors.textOnAction,
   },
 
+  // Fila del cronometro de una serie por tiempo, en lugar de los atajos de peso
+  keypadFilaCronometro: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    height: 44,
+    marginBottom: spacing.xs,
+  },
+  botonCronometro: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    height: 40,
+    minWidth: 104,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.sm,
+    backgroundColor: colors.action,
+  },
+  botonCronometroParar: {
+    backgroundColor: colors.danger,
+  },
+  botonCronometroTexto: {
+    fontSize: fontSize.body,
+    fontWeight: '700',
+    color: colors.textOnAction,
+  },
+  cronometroValor: {
+    flex: 1,
+    fontSize: 28,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+  },
+  cronometroValorQuieto: {
+    color: colors.textSecondary,
+  },
+  cronometroObjetivo: {
+    fontSize: fontSize.small,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+
   tecladoGrilla: {
     gap: 6,
     marginBottom: spacing.sm,
@@ -1892,6 +2188,9 @@ const estilos = StyleSheet.create({
   },
   botonConfirmarPresionado: {
     opacity: 0.85,
+  },
+  botonConfirmarDeshabilitado: {
+    backgroundColor: colors.actionDisabled,
   },
   botonConfirmarTexto: {
     fontSize: fontSize.body,
@@ -2014,6 +2313,14 @@ const estilos = StyleSheet.create({
     paddingVertical: spacing.xs,
     fontSize: fontSize.body,
     color: colors.textPrimary,
+  },
+  medidaFila: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  medidaChip: {
+    flex: 1,
+    alignItems: 'center',
   },
   miniChips: {
     flexDirection: 'row',

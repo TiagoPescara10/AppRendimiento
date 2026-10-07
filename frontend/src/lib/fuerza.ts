@@ -4,6 +4,7 @@
 // de gimnasio. No tocan la base ni React, para poder probarse directo en Node.
 
 import type { SerieRow } from '@/db/schema';
+import { textoDuracion } from './duracion';
 import { diasEntre } from './fechas';
 
 export interface SerieConFecha extends SerieRow {
@@ -246,7 +247,10 @@ export function agruparEjerciciosPorRutina<E extends { id: string }>(
 
 /** Lo minimo de una serie para describirla. Una SerieRow o un borrador encajan. */
 export interface SerieHecha {
-  repeticiones: number;
+  /** null en las series por tiempo. */
+  repeticiones: number | null;
+  /** Solo en las series por tiempo. */
+  duracionSeg?: number | null;
   pesoKg: number | null;
 }
 
@@ -256,6 +260,10 @@ function kgTexto(kg: number): string {
 }
 
 function serieTexto(s: SerieHecha): string {
+  if (s.duracionSeg != null) {
+    const tiempo = textoDuracion(s.duracionSeg);
+    return s.pesoKg && s.pesoKg > 0 ? `${tiempo} · ${kgTexto(s.pesoKg)} kg` : tiempo;
+  }
   return s.pesoKg && s.pesoKg > 0 ? `${s.repeticiones} × ${kgTexto(s.pesoKg)} kg` : `${s.repeticiones} reps`;
 }
 
@@ -263,8 +271,9 @@ function serieTexto(s: SerieHecha): string {
  * Como se lee lo hecho en un ejercicio en el cierre de la sesion.
  *
  * Si todas las series fueron iguales se agrupan ("3 series de 10 × 60 kg"),
- * que es como lo dice cualquiera en el gimnasio. Si no, van una por una en el
- * orden en que se hicieron: agruparlas perderia la progresion de la carga.
+ * que es como lo dice cualquiera en el gimnasio. Las por tiempo se agrupan
+ * como "3 × 1:00". Si no son iguales, van una por una en el orden en que se
+ * hicieron: agruparlas perderia la progresion de la carga.
  * Sin series devuelve '' y la pantalla no muestra el ejercicio.
  */
 export function textoSeriesEjercicio(series: SerieHecha[]): string {
@@ -274,7 +283,10 @@ export function textoSeriesEjercicio(series: SerieHecha[]): string {
   const todasIguales = series.every((s) => serieTexto(s) === primera);
 
   if (todasIguales) {
-    return series.length === 1 ? primera : `${series.length} series de ${primera}`;
+    if (series.length === 1) return primera;
+    return series[0].duracionSeg != null
+      ? `${series.length} × ${primera}`
+      : `${series.length} series de ${primera}`;
   }
   return series.map(serieTexto).join(' · ');
 }

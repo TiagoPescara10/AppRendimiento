@@ -1,4 +1,5 @@
-// Pruebas de las funciones puras de Fuerza y Progresion en src/lib/fuerza.ts
+// Pruebas de las funciones puras de Fuerza y Progresion en src/lib/fuerza.ts,
+// y del tiempo de las series por tiempo en src/lib/duracion.ts
 //
 //   node scripts/probar-fuerza.mjs
 
@@ -53,6 +54,7 @@ try {
 
 const req = createRequire(join(build, 'x.cjs'));
 const F = req('./lib/fuerza.js');
+const D = req('./lib/duracion.js');
 
 // Limpiar el build temporal al terminar el proceso
 process.on('exit', () => {
@@ -315,6 +317,56 @@ prueba('sin peso se cuentan repeticiones', () => {
   igual(F.textoSeriesEjercicio([s, s]), '2 series de 12 reps', 'peso corporal');
   igual(F.textoSeriesEjercicio([{ repeticiones: 12, pesoKg: 0 }]), '12 reps', 'peso cero');
   igual(F.textoSeriesEjercicio([]), '', 'vacio');
+});
+
+prueba('series por tiempo se agrupan como "3 × 1:00"', () => {
+  const s = { repeticiones: null, duracionSeg: 60, pesoKg: null };
+  igual(F.textoSeriesEjercicio([s, s, s]), '3 × 1:00', 'tres iguales');
+  igual(F.textoSeriesEjercicio([s]), '1:00', 'una sola');
+  const conDisco = { repeticiones: null, duracionSeg: 45, pesoKg: 10 };
+  igual(F.textoSeriesEjercicio([conDisco, conDisco]), '2 × 0:45 · 10 kg', 'con peso');
+  igual(
+    F.textoSeriesEjercicio([s, { ...s, duracionSeg: 45 }, { ...s, duracionSeg: 50 }]),
+    '1:00 · 0:45 · 0:50',
+    'distintas, una por una',
+  );
+});
+
+// --- tiempo de las series por tiempo -------------------------------------------
+
+console.log('\ntiempo de las series por tiempo:');
+
+prueba('los digitos se leen de derecha a izquierda como m:ss', () => {
+  igual(D.leerDigitosTiempo('1'), { seg: 1, texto: '0:01', valido: true }, '1');
+  igual(D.leerDigitosTiempo('13'), { seg: 13, texto: '0:13', valido: true }, '13');
+  igual(D.leerDigitosTiempo('130'), { seg: 90, texto: '1:30', valido: true }, '130');
+  igual(D.leerDigitosTiempo('3000'), { seg: 1800, texto: '30:00', valido: true }, '3000');
+  igual(D.leerDigitosTiempo('9959'), { seg: 5999, texto: '99:59', valido: true }, 'maximo');
+});
+
+prueba('sin digitos no hay tiempo, y mas de 59 segundos no es valido', () => {
+  igual(D.leerDigitosTiempo(''), { seg: null, texto: '0:00', valido: true }, 'vacio');
+  igual(D.leerDigitosTiempo('190'), { seg: null, texto: '1:90', valido: false }, '190 no se normaliza');
+  igual(D.leerDigitosTiempo('60'), { seg: null, texto: '0:60', valido: false }, '60');
+});
+
+prueba('textoDuracion y digitosDeDuracion van y vuelven', () => {
+  igual(D.textoDuracion(60), '1:00', '1 min');
+  igual(D.textoDuracion(5), '0:05', '5 seg');
+  igual(D.textoDuracion(1800), '30:00', '30 min');
+  for (const seg of [1, 13, 59, 60, 90, 754, 1800, 5999]) {
+    igual(D.leerDigitosTiempo(D.digitosDeDuracion(seg)).seg, seg, `ida y vuelta ${seg}`);
+  }
+  igual(D.digitosDeDuracion(7200), '9959', 'tope de 99:59');
+});
+
+prueba('el pitido suena al cruzar cada marca de 15 s, una vez aunque se salteen varias', () => {
+  igual(D.cruzoMarca(14, 15), true, 'llega a 15');
+  igual(D.cruzoMarca(15, 16), false, 'ya paso');
+  igual(D.cruzoMarca(0, 14), false, 'antes de 15');
+  igual(D.cruzoMarca(29, 31), true, 'salta el 30');
+  igual(D.cruzoMarca(10, 70), true, 'vuelve de segundo plano');
+  igual(D.cruzoMarca(30, 30), false, 'misma lectura');
 });
 
 // --- resumen final ---------------------------------------------------------
