@@ -8,6 +8,8 @@
 // - Grafico de evolucion reutilizando el SVG de GraficoPeso.
 // - Card informativa del coach (sobria, sin gamificacion ni trofeos).
 // - Desglose cronologico de series por sesion.
+// Los ejercicios por tiempo (plancha, cardio) no tienen 1RM: la card muestra
+// el mejor tiempo y el grafico su evolucion, dia por dia.
 
 import { useState, useCallback } from 'react';
 import {
@@ -42,8 +44,12 @@ import {
   volumenTotal,
   evolucion1RM,
   textoCoachFuerza,
+  mejorTiempoDe,
+  evolucionTiempo,
+  textoCoachTiempo,
   type PuntoEvolucion1RM,
 } from '@/lib/fuerza';
+import { textoDuracion } from '@/lib/duracion';
 import { GraficoPeso } from '@/features/progreso/components/GraficoPeso';
 import { aFechaLocal, diasEntre } from '@/lib/fechas';
 import { partesFecha } from '@/features/agenda/formato';
@@ -53,6 +59,18 @@ interface SesionAgrupada {
   sesionId: string;
   series: SerieConSesion[];
   mejor1RM: number | null;
+  /** Solo en los ejercicios por tiempo. */
+  mejorTiempoSeg: number | null;
+}
+
+function textoSerie(s: SerieConSesion): string {
+  if (s.duracion_seg !== null) {
+    const tiempo = textoDuracion(s.duracion_seg);
+    return s.peso_kg !== null && s.peso_kg > 0 ? `${tiempo} · ${s.peso_kg} kg` : tiempo;
+  }
+  return s.peso_kg !== null && s.peso_kg > 0
+    ? `${s.peso_kg} kg × ${s.repeticiones}`
+    : `Corporal × ${s.repeticiones}`;
 }
 
 export default function DetalleFuerzaEjercicio() {
@@ -122,7 +140,9 @@ export default function DetalleFuerzaEjercicio() {
           </Text>
           {ejercicio ? (
             <Text style={estilos.cardVaciaTexto}>
-              Hacelo en una rutina de gimnasio para empezar a ver la evolución de tus cargas y el 1RM estimado.
+              {ejercicio.medida === 'tiempo'
+                ? 'Hacelo en una rutina de gimnasio para empezar a ver la evolución de tu mejor tiempo.'
+                : 'Hacelo en una rutina de gimnasio para empezar a ver la evolución de tus cargas y el 1RM estimado.'}
             </Text>
           ) : null}
         </View>
@@ -131,6 +151,10 @@ export default function DetalleFuerzaEjercicio() {
   }
 
   // Calculos para el ejercicio seleccionado
+  const porTiempo = ejercicio.medida === 'tiempo';
+  const evoTiempo = porTiempo ? evolucionTiempo(series) : [];
+  const mejorTiempo = porTiempo ? mejorTiempoDe(series) : null;
+  const ultimoTiempo = evoTiempo.length > 0 ? evoTiempo[evoTiempo.length - 1].segundos : null;
   const ultimoPunto = evolucion.length > 0 ? evolucion[evolucion.length - 1] : null;
   const unRMEstimado = ultimoPunto ? ultimoPunto.estimado : null;
   const mejorSerie = mejorSerieDe(series);
@@ -146,13 +170,21 @@ export default function DetalleFuerzaEjercicio() {
   const frecuenciaSemanalPromedio = Math.round((diasUltimas4Semanas / 4) * 10) / 10;
 
   // Texto sobrio del coach
-  const coachTexto = textoCoachFuerza(evolucion, ejercicio.nombre);
+  const coachTexto = porTiempo
+    ? textoCoachTiempo(evoTiempo, ejercicio.nombre)
+    : textoCoachFuerza(evolucion, ejercicio.nombre);
 
-  // Puntos para GraficoPeso
-  const puntosGrafico = evolucion.map((p) => ({
-    fecha: p.fecha,
-    peso_kg: p.estimado,
-  }));
+  // Series de la semana, para los ejercicios por tiempo en lugar del volumen
+  const seriesSemanaCount = seriesSemana.length;
+
+  // Puntos para GraficoPeso. No tiene ejes con unidad, asi que los segundos
+  // entran igual que los kg.
+  const puntosGrafico = porTiempo
+    ? evoTiempo.map((p) => ({ fecha: p.fecha, peso_kg: p.segundos }))
+    : evolucion.map((p) => ({
+        fecha: p.fecha,
+        peso_kg: p.estimado,
+      }));
 
   // Agrupacion de series por sesion para el historial
   const mapaSesiones = new Map<string, SesionAgrupada>();
@@ -161,17 +193,23 @@ export default function DetalleFuerzaEjercicio() {
     const actual = mapaSesiones.get(clave);
     const est = estimarUnaRM(s.peso_kg, s.repeticiones);
 
+    const dur = s.duracion_seg;
+
     if (!actual) {
       mapaSesiones.set(clave, {
         fecha: s.fecha,
         sesionId: s.sesion_id,
         series: [s],
         mejor1RM: est,
+        mejorTiempoSeg: dur,
       });
     } else {
       actual.series.push(s);
       if (est !== null && (actual.mejor1RM === null || est > actual.mejor1RM)) {
         actual.mejor1RM = est;
+      }
+      if (dur !== null && (actual.mejorTiempoSeg === null || dur > actual.mejorTiempoSeg)) {
+        actual.mejorTiempoSeg = dur;
       }
     }
   }
@@ -194,7 +232,54 @@ export default function DetalleFuerzaEjercicio() {
         </View>
       </View>
 
-      {/* Card principal: 1RM Estimado y metricas */}
+      {/* Card principal de un ejercicio por tiempo: mejor tiempo y metricas */}
+      {porTiempo ? (
+      <View style={estilos.card}>
+        <Text style={estilos.seccionSubtitulo}>Mejor tiempo</Text>
+        <View style={estilos.filaPrincipal}>
+          <View style={estilos.filaNumero1RM}>
+            <Text style={estilos.numeroGrande}>
+              {mejorTiempo?.duracion_seg != null ? textoDuracion(mejorTiempo.duracion_seg) : '—'}
+            </Text>
+            {mejorTiempo?.peso_kg != null && mejorTiempo.peso_kg > 0 ? (
+              <View style={estilos.columnaUnidad}>
+                <Text style={estilos.unidadKg}>{mejorTiempo.peso_kg} kg</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={estilos.separador} />
+
+        <View style={estilos.metricasFila}>
+          <View style={estilos.metricaColumna}>
+            <Text style={estilos.metricaNumero}>
+              {ultimoTiempo !== null ? textoDuracion(ultimoTiempo) : '—'}
+            </Text>
+            <Text style={estilos.metricaLabel}>Última vez</Text>
+          </View>
+
+          <View style={estilos.metricaSeparador} />
+
+          <View style={estilos.metricaColumna}>
+            <Text style={estilos.metricaNumero}>{seriesSemanaCount}</Text>
+            <Text style={estilos.metricaLabel}>Series semana</Text>
+          </View>
+
+          <View style={estilos.metricaSeparador} />
+
+          <View style={estilos.metricaColumna}>
+            <Text style={estilos.metricaNumero}>
+              {frecuenciaSemanalPromedio > 0
+                ? `${frecuenciaSemanalPromedio} / sem`
+                : '0 / sem'}
+            </Text>
+            <Text style={estilos.metricaLabel}>Frecuencia</Text>
+          </View>
+        </View>
+      </View>
+      ) : (
+      /* Card principal: 1RM Estimado y metricas */
       <View style={estilos.card}>
         <Text style={estilos.seccionSubtitulo}>1RM Estimado</Text>
 
@@ -249,10 +334,13 @@ export default function DetalleFuerzaEjercicio() {
           </View>
         </View>
       </View>
+      )}
 
       {/* Grafico de evolucion */}
       <View style={estilos.card}>
-        <Text style={estilos.seccionSubtitulo}>Evolución de 1RM</Text>
+        <Text style={estilos.seccionSubtitulo}>
+          {porTiempo ? 'Evolución del mejor tiempo' : 'Evolución de 1RM'}
+        </Text>
         {puntosGrafico.length > 0 ? (
           <GraficoPeso
             crudos={puntosGrafico}
@@ -261,7 +349,9 @@ export default function DetalleFuerzaEjercicio() {
           />
         ) : (
           <Text style={estilos.textoVacioGrafico}>
-            Todavía no hay suficientes series con carga y hasta 12 repeticiones para trazar la curva de este ejercicio.
+            {porTiempo
+              ? 'Todavía no hay series con tiempo para trazar la curva de este ejercicio.'
+              : 'Todavía no hay suficientes series con carga y hasta 12 repeticiones para trazar la curva de este ejercicio.'}
           </Text>
         )}
       </View>
@@ -270,11 +360,13 @@ export default function DetalleFuerzaEjercicio() {
       <View style={estilos.cardCoach}>
         <View style={estilos.coachHeader}>
           <Ionicons name="sparkles-outline" size={16} color={colors.action} />
-          <Text style={estilos.coachTitulo}>Análisis de carga</Text>
+          <Text style={estilos.coachTitulo}>{porTiempo ? 'Análisis de tiempo' : 'Análisis de carga'}</Text>
         </View>
         <Text style={estilos.coachTexto}>
           {coachTexto ??
-            'Registrá más sesiones con este ejercicio para ver la tendencia de cargas a lo largo de las semanas.'}
+            (porTiempo
+              ? 'Registrá más sesiones con este ejercicio para ver cómo cambia tu tiempo a lo largo de las semanas.'
+              : 'Registrá más sesiones con este ejercicio para ver la tendencia de cargas a lo largo de las semanas.')}
         </Text>
       </View>
 
@@ -299,22 +391,24 @@ export default function DetalleFuerzaEjercicio() {
                   <Text style={estilos.sesionFechaTexto}>
                     {dia} de {mes}
                   </Text>
-                  {ses.mejor1RM !== null && (
-                    <Text style={estilos.sesion1RMTag}>
-                      1RM est: {ses.mejor1RM} kg
-                    </Text>
-                  )}
+                  {porTiempo
+                    ? ses.mejorTiempoSeg !== null && (
+                        <Text style={estilos.sesion1RMTag}>
+                          Mejor: {textoDuracion(ses.mejorTiempoSeg)}
+                        </Text>
+                      )
+                    : ses.mejor1RM !== null && (
+                        <Text style={estilos.sesion1RMTag}>
+                          1RM est: {ses.mejor1RM} kg
+                        </Text>
+                      )}
                 </View>
 
                 <View style={estilos.seriesGrid}>
                   {ses.series.map((s, sIdx) => (
                     <View key={s.id || sIdx} style={estilos.seriePill}>
                       <Text style={estilos.seriePillNum}>S{sIdx + 1}</Text>
-                      <Text style={estilos.seriePillValor}>
-                        {s.peso_kg !== null && s.peso_kg > 0
-                          ? `${s.peso_kg} kg × ${s.repeticiones}`
-                          : `Corporal × ${s.repeticiones}`}
-                      </Text>
+                      <Text style={estilos.seriePillValor}>{textoSerie(s)}</Text>
                     </View>
                   ))}
                 </View>

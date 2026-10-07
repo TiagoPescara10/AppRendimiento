@@ -42,7 +42,8 @@ import {
   formatearDecimal,
   formatearSegundos,
 } from '@/features/entrenamiento/temporizador';
-import { volumenTotal } from '@/lib/fuerza';
+import { textoSeriesEjercicio, volumenTotal } from '@/lib/fuerza';
+import { textoDuracion } from '@/lib/duracion';
 import type { ConfigTemporizador } from '@/features/entrenamiento/temporizador';
 import type { EventoRow, SesionEntrenamientoRow } from '@/db/schema';
 
@@ -295,8 +296,14 @@ export default function DetalleEvento() {
 /**
  * "3 x 10 · 40 kg" si todas las series fueron iguales; si no,
  * "3 series · máx. 42,5 kg". Es una referencia para arrancar, no el detalle.
+ * Por tiempo: "3 × 1:00", o "3 series · máx. 1:30".
  */
 function resumenPrevias(previas: SeriePreviaEjercicio[]): string {
+  if (previas.every((p) => p.duracion_seg !== null)) {
+    const tiempos = previas.map((p) => p.duracion_seg ?? 0);
+    if (new Set(tiempos).size === 1) return `${previas.length} × ${textoDuracion(tiempos[0])}`;
+    return `${previas.length} series · máx. ${textoDuracion(Math.max(...tiempos))}`;
+  }
   const reps = new Set(previas.map((p) => p.repeticiones));
   const pesos = previas.map((p) => p.peso_kg ?? 0);
   const maxPeso = Math.max(...pesos);
@@ -340,7 +347,16 @@ function PlanRutina({
 
           const pares = await Promise.all(
             rg.ejercicios.map(
-              async (ej) => [ej.id, await obtenerSeriesPreviasPorEjercicio(usuarioId, ej.id)] as const,
+              async (ej) =>
+                [
+                  ej.relacion_id,
+                  await obtenerSeriesPreviasPorEjercicio(
+                    usuarioId,
+                    ej.id,
+                    undefined,
+                    ej.bloque === 'calentamiento',
+                  ),
+                ] as const,
             ),
           );
           if (vivo) setPrevias(Object.fromEntries(pares));
@@ -417,11 +433,19 @@ function PlanRutina({
           </View>
         ) : (
           rutina.ejercicios.map((ej, idx) => {
-            const ultimas = previas[ej.id] ?? [];
+            const ultimas = previas[ej.relacion_id] ?? [];
+            const hayCalentamiento = rutina.ejercicios.some((e) => e.bloque === 'calentamiento');
+            const primeroDelBloque = idx === 0 || rutina.ejercicios[idx - 1].bloque !== ej.bloque;
             return (
-              <View key={ej.relacion_id} style={estilos.cardEjercicio}>
+              <View key={ej.relacion_id}>
+              {hayCalentamiento && primeroDelBloque ? (
+                <Text style={estilos.tituloBloque}>
+                  {ej.bloque === 'calentamiento' ? 'Calentamiento' : 'Principal'}
+                </Text>
+              ) : null}
+              <View style={estilos.cardEjercicio}>
                 <View style={estilos.ejercicioHeaderFila}>
-                  <Text style={estilos.planNumero}>{idx + 1}</Text>
+                  <Text style={estilos.planNumero}>{ej.orden + 1}</Text>
                   <View style={estilos.ejercicioInfoCol}>
                     <Text style={estilos.ejercicioTitulo}>{ej.nombre}</Text>
                     <Text style={estilos.ejercicioGrupo}>{ej.grupo}</Text>
@@ -442,12 +466,24 @@ function PlanRutina({
                     : 'Primera vez con este ejercicio'}
                 </Text>
               </View>
+              </View>
             );
           })
         )}
       </View>
     </View>
   );
+}
+
+/** Series agrupadas por ejercicio, en el orden en que se hicieron. */
+function agruparPorEjercicio(series: SerieConEjercicio[]): Map<string, SerieConEjercicio[]> {
+  const map = new Map<string, SerieConEjercicio[]>();
+  for (const s of series) {
+    const lista = map.get(s.ejercicio_nombre) ?? [];
+    lista.push(s);
+    map.set(s.ejercicio_nombre, lista);
+  }
+  return map;
 }
 
 /** Una fila etiqueta/valor de la card. */
@@ -533,20 +569,20 @@ function DetalleSesionRutina({ sesion, usuarioId, eventoFecha }: PropsDetalleRut
     listarSeriesConEjercicio(sesion.id).then(setSeries).catch(console.error);
   }, [sesion.id]);
 
-  const porEjercicio = useMemo(() => {
-    const map = new Map<string, SerieConEjercicio[]>();
-    for (const s of series) {
-      const lista = map.get(s.ejercicio_nombre) ?? [];
-      lista.push(s);
-      map.set(s.ejercicio_nombre, lista);
-    }
-    return map;
-  }, [series]);
+  // El calentamiento se muestra aparte y no suma a nada del resumen
+  const principales = useMemo(() => series.filter((s) => s.es_calentamiento === 0), [series]);
+  const deCalentamiento = useMemo(() => series.filter((s) => s.es_calentamiento === 1), [series]);
 
-  const totalSeries = series.length;
+  const porEjercicio = useMemo(() => agruparPorEjercicio(principales), [principales]);
+  const calentamientoPorEjercicio = useMemo(
+    () => agruparPorEjercicio(deCalentamiento),
+    [deCalentamiento],
+  );
+
+  const totalSeries = principales.length;
   const volumen = useMemo(() => {
-    return volumenTotal(series.map((s) => ({ ...s, peso_kg: s.peso_kg ?? 0 })));
-  }, [series]);
+    return volumenTotal(principales.map((s) => ({ ...s, peso_kg: s.peso_kg ?? 0 })));
+  }, [principales]);
 
   const ejerciciosUnicos = Array.from(porEjercicio.keys());
 
@@ -563,7 +599,7 @@ function DetalleSesionRutina({ sesion, usuarioId, eventoFecha }: PropsDetalleRut
           const ejId = seriesEj[0]?.ejercicio_id;
           if (!ejId) continue;
 
-          const previas = await obtenerSeriesPreviasPorEjercicio(usuarioId, ejId, sesion.id);
+          const previas = await obtenerSeriesPreviasPorEjercicio(usuarioId, ejId, sesion.id, false);
           if (previas.length === 0) continue;
 
           const ultActual = seriesEj[seriesEj.length - 1];
@@ -600,9 +636,69 @@ function DetalleSesionRutina({ sesion, usuarioId, eventoFecha }: PropsDetalleRut
     };
   }, [usuarioId, series, sesion.id, porEjercicio, totalSeries]);
 
+  const renderDesglose = (grupos: Map<string, SerieConEjercicio[]>) =>
+    Array.from(grupos.entries()).map(([nombre, seriesEj]) => {
+      const primerEj = seriesEj[0];
+      const primerEjId = primerEj?.ejercicio_id;
+      const grupo = primerEj?.ejercicio_grupo;
+
+      return (
+        <View key={nombre} style={estilos.cardEjercicio}>
+          <View style={estilos.ejercicioHeaderFila}>
+            <View style={estilos.ejercicioInfoCol}>
+              <Text style={estilos.ejercicioTitulo}>{nombre}</Text>
+              {grupo ? <Text style={estilos.ejercicioGrupo}>{grupo}</Text> : null}
+            </View>
+            {primerEjId ? (
+              <Pressable
+                hitSlop={8}
+                style={estilos.botonProgresion}
+                onPress={() => router.push(`/entrenamiento/fuerza/${primerEjId}`)}
+              >
+                <Text style={estilos.enlaceProgresion}>Ver progresión ›</Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          <View style={estilos.tablaSeries}>
+            {seriesEj.map((s, idx) => {
+              const esCorporal = s.peso_kg === null || s.peso_kg === 0;
+              const porTiempo = s.duracion_seg !== null;
+              return (
+                <View key={s.id} style={estilos.filaSerie}>
+                  <Text style={estilos.serieTag}>S{idx + 1}</Text>
+                  <Text style={estilos.serieReps}>
+                    {porTiempo ? textoDuracion(s.duracion_seg ?? 0) : `${s.repeticiones} reps`}
+                  </Text>
+                  <Text
+                    style={[
+                      estilos.serieCarga,
+                      esCorporal && estilos.serieCargaCorporal,
+                    ]}
+                  >
+                    {esCorporal ? (porTiempo ? '' : 'peso corporal') : `${s.peso_kg} kg`}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      );
+    });
+
   const compartirResumen = async () => {
     try {
       const lineasEjercicios = Array.from(porEjercicio.entries()).map(([nombre, seriesEj]) => {
+        if (seriesEj.every((s) => s.duracion_seg !== null)) {
+          const detalleTiempo = textoSeriesEjercicio(
+            seriesEj.map((s) => ({
+              repeticiones: null,
+              duracionSeg: s.duracion_seg,
+              pesoKg: s.peso_kg,
+            })),
+          );
+          return `• ${nombre}: ${detalleTiempo}`;
+        }
         const conPeso = seriesEj.filter((s) => s.peso_kg !== null && s.peso_kg > 0);
         let detalle = `${seriesEj.length} series`;
         if (conPeso.length > 0) {
@@ -658,52 +754,16 @@ function DetalleSesionRutina({ sesion, usuarioId, eventoFecha }: PropsDetalleRut
       {/* 4. Desglose por ejercicio */}
       <View style={estilos.desgloseContenedor}>
         <Text style={estilos.seccionTitulo}>Desglose por ejercicio</Text>
-        {Array.from(porEjercicio.entries()).map(([nombre, seriesEj]) => {
-          const primerEj = seriesEj[0];
-          const primerEjId = primerEj?.ejercicio_id;
-          const grupo = primerEj?.ejercicio_grupo;
-
-          return (
-            <View key={nombre} style={estilos.cardEjercicio}>
-              <View style={estilos.ejercicioHeaderFila}>
-                <View style={estilos.ejercicioInfoCol}>
-                  <Text style={estilos.ejercicioTitulo}>{nombre}</Text>
-                  {grupo ? <Text style={estilos.ejercicioGrupo}>{grupo}</Text> : null}
-                </View>
-                {primerEjId ? (
-                  <Pressable
-                    hitSlop={8}
-                    style={estilos.botonProgresion}
-                    onPress={() => router.push(`/entrenamiento/fuerza/${primerEjId}`)}
-                  >
-                    <Text style={estilos.enlaceProgresion}>Ver progresión ›</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-
-              <View style={estilos.tablaSeries}>
-                {seriesEj.map((s, idx) => {
-                  const esCorporal = s.peso_kg === null || s.peso_kg === 0;
-                  return (
-                    <View key={s.id} style={estilos.filaSerie}>
-                      <Text style={estilos.serieTag}>S{idx + 1}</Text>
-                      <Text style={estilos.serieReps}>{s.repeticiones} reps</Text>
-                      <Text
-                        style={[
-                          estilos.serieCarga,
-                          esCorporal && estilos.serieCargaCorporal,
-                        ]}
-                      >
-                        {esCorporal ? 'peso corporal' : `${s.peso_kg} kg`}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            </View>
-          );
-        })}
+        {renderDesglose(porEjercicio)}
       </View>
+
+      {/* El calentamiento, como registro: no suma a las metricas de arriba */}
+      {calentamientoPorEjercicio.size > 0 ? (
+        <View style={estilos.desgloseContenedor}>
+          <Text style={estilos.seccionTitulo}>Calentamiento</Text>
+          {renderDesglose(calentamientoPorEjercicio)}
+        </View>
+      ) : null}
 
       {/* 5. Card del coach con mascota León */}
       {mensajeCoach ? (
@@ -932,6 +992,16 @@ const estilos = StyleSheet.create({
     fontWeight: '600',
     color: colors.textSecondary,
     marginLeft: 2,
+  },
+  // Calentamiento / Principal sobre los ejercicios de una rutina con calentamiento
+  tituloBloque: {
+    fontSize: fontSize.caption,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginLeft: 2,
+    marginBottom: spacing.xs,
   },
   cardEjercicio: {
     backgroundColor: colors.surface,

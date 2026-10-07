@@ -35,6 +35,7 @@ import {
   type ResumenFilaEjercicio,
   type Tendencia,
 } from '@/lib/fuerza';
+import { textoDuracion } from '@/lib/duracion';
 import { aFechaLocal } from '@/lib/fechas';
 
 const ICONO_TENDENCIA: Record<Tendencia, { nombre: 'arrow-up' | 'arrow-down' | 'remove'; color: string }> = {
@@ -80,12 +81,20 @@ export default function FuerzaPorRutina() {
           const pares = await Promise.all(
             conHistorial.map(
               async (ej) =>
-                [ej.id, resumenFilaEjercicio(await listarSeriesPorEjercicio(perfil.id, ej.id))] as const,
+                [
+                  ej.id,
+                  resumenFilaEjercicio(await listarSeriesPorEjercicio(perfil.id, ej.id), ej.medida),
+                ] as const,
             ),
           );
           if (!vivo) return;
 
-          const nuevos = agruparEjerciciosPorRutina(rutinas, conHistorial);
+          // El calentamiento no tiene progresion que mostrar: solo el bloque principal
+          const principales = rutinas.map((r) => ({
+            ...r,
+            ejercicios: r.ejercicios.filter((e) => e.bloque === 'principal'),
+          }));
+          const nuevos = agruparEjerciciosPorRutina(principales, conHistorial);
           setGrupos(nuevos);
           setResumenes(Object.fromEntries(pares));
           // Mantener la rutina elegida al volver del detalle; si ya no existe,
@@ -183,8 +192,12 @@ export default function FuerzaPorRutina() {
           const r = resumenes[ej.id];
           const tend = r?.tendencia ? ICONO_TENDENCIA[r.tendencia] : null;
           const mejor = r?.mejorSerie;
-          const valor =
-            r?.unRM != null
+          const porTiempo = ej.medida === 'tiempo';
+          const valor = porTiempo
+            ? mejor?.duracion_seg != null
+              ? textoDuracion(mejor.duracion_seg)
+              : null
+            : r?.unRM != null
               ? `${r.unRM} kg`
               : mejor
               ? `${mejor.peso_kg} kg × ${mejor.repeticiones}`
@@ -222,7 +235,7 @@ export default function FuerzaPorRutina() {
                     {tend ? <Ionicons name={tend.nombre} size={14} color={tend.color} /> : null}
                   </View>
                   <Text style={estilos.filaValorEtiqueta}>
-                    {r?.unRM != null ? '1RM est.' : 'mejor serie'}
+                    {porTiempo ? 'mejor tiempo' : r?.unRM != null ? '1RM est.' : 'mejor serie'}
                   </Text>
                 </View>
               ) : null}

@@ -369,6 +369,58 @@ prueba('el pitido suena al cruzar cada marca de 15 s, una vez aunque se salteen 
   igual(D.cruzoMarca(30, 30), false, 'misma lectura');
 });
 
+// --- ejercicios por tiempo en Fuerza --------------------------------------------
+
+console.log('\nejercicios por tiempo en Fuerza:');
+
+const serieT = (fecha, seg, extra = {}) => ({
+  id: `${fecha}-${seg}`, sesion_id: fecha, ejercicio_id: 'plancha', orden: 0,
+  repeticiones: null, duracion_seg: seg, peso_kg: null, es_calentamiento: 0,
+  created_at: '', updated_at: '', fecha, ...extra,
+});
+
+prueba('las series por tiempo no entran en 1RM, mejor serie ni volumen', () => {
+  const series = [serieT('2026-09-01', 60, { peso_kg: 20 })];
+  igual(F.estimarUnaRM(20, null), null, '1RM sin repeticiones');
+  igual(F.evolucion1RM(series), [], 'evolucion 1RM vacia');
+  igual(F.mejorSerieDe(series), null, 'mejor serie');
+  igual(F.volumenTotal(series), 0, 'volumen');
+});
+
+prueba('mejor tiempo y su evolucion, el mejor de cada dia', () => {
+  const series = [
+    serieT('2026-09-01', 45), serieT('2026-09-01', 60),
+    serieT('2026-09-08', 75), serieT('2026-09-08', 50),
+    { ...serieT('2026-09-08', 0), duracion_seg: null, repeticiones: 20 },
+  ];
+  igual(F.mejorTiempoDe(series).duracion_seg, 75, 'mejor tiempo');
+  igual(F.evolucionTiempo(series), [
+    { fecha: '2026-09-01', segundos: 60 },
+    { fecha: '2026-09-08', segundos: 75 },
+  ], 'evolucion');
+});
+
+prueba('el coach habla del tiempo con el mismo tono', () => {
+  const sube = [{ fecha: '2026-09-01', segundos: 60 }, { fecha: '2026-09-15', segundos: 90 }];
+  igual(F.textoCoachTiempo(sube, 'Plancha isometrica'),
+    'Tu mejor tiempo en plancha isometrica subio 0:30 en las ultimas 2 semanas.', 'sube');
+  const baja = [{ fecha: '2026-09-01', segundos: 90 }, { fecha: '2026-09-08', segundos: 80 }];
+  igual(F.textoCoachTiempo(baja, 'Plancha lateral'),
+    'Tu mejor tiempo en plancha lateral bajo 0:10 en la ultima semana.', 'baja');
+  const igualT = [{ fecha: '2026-09-01', segundos: 60 }, { fecha: '2026-09-08', segundos: 60 }];
+  igual(F.textoCoachTiempo(igualT, 'Eliptico'), 'Mismo mejor tiempo en eliptico en la ultima semana.', 'igual');
+  igual(F.textoCoachTiempo(sube.slice(0, 1), 'X'), null, 'un solo punto');
+});
+
+prueba('la fila de un ejercicio por tiempo: sin 1RM, mejor tiempo y tendencia', () => {
+  const series = [serieT('2026-09-01', 60), serieT('2026-09-08', 45)];
+  const r = F.resumenFilaEjercicio(series, 'tiempo');
+  igual(r.unRM, null, 'sin 1RM');
+  igual(r.mejorSerie.duracion_seg, 60, 'mejor tiempo');
+  igual(r.tendencia, 'baja', 'tendencia del ultimo dia contra el anterior');
+  igual(r.ultimaFecha, '2026-09-08', 'ultima fecha');
+});
+
 // --- resumen final ---------------------------------------------------------
 
 console.log(`\n${ok} pasan, ${fallos.length} fallan\n`);

@@ -3219,6 +3219,48 @@ await prueba('las series guardan si son de calentamiento y el Anterior mira el m
   await schema.cerrarDb();
 });
 
+await prueba('el calentamiento y las series por tiempo no suman volumen ni cuentan en Fuerza', async () => {
+  const db = await schema.initDb(join(tmp, 'v21-volumen.db'));
+  await qPerfil.crearPerfil({ id: 'u-v', fecha_alta: '2026-09-01T10:00:00-03:00' });
+  const id = async (nombre) => (await db.getFirstAsync('SELECT id FROM ejercicio WHERE nombre = ?', [nombre])).id;
+  const sentadilla = await id('Sentadilla trasera con barra');
+  const plancha = await id('Plancha isometrica');
+  const movilidad = await id('Movilidad articular general');
+
+  const res = await guardarRutina.guardarRutinaTerminada({
+    usuarioId: 'u-v',
+    inicio: new Date(2026, 8, 3, 18, 0, 0),
+    duracionRealSeg: 3600,
+    series: [
+      { ejercicioId: movilidad, repeticiones: null, duracionSeg: 300, pesoKg: null, esCalentamiento: true },
+      { ejercicioId: sentadilla, repeticiones: 10, pesoKg: 40, esCalentamiento: true },
+      { ejercicioId: sentadilla, repeticiones: 8, pesoKg: 100 },
+      { ejercicioId: sentadilla, repeticiones: 6, pesoKg: 110 },
+      { ejercicioId: plancha, repeticiones: null, duracionSeg: 60, pesoKg: 10 },
+      { ejercicioId: plancha, repeticiones: null, duracionSeg: 60, pesoKg: null },
+    ],
+  });
+
+  const r = await qSesiones.obtenerResumenRutina(res.sesion.id);
+  igual(r.volumen_kg, 8 * 100 + 6 * 110, 'volumen: sin calentamiento ni plancha con disco');
+  igual(r.series_count, 4, 'series: las dos de sentadilla y las dos de plancha');
+  igual(r.ejercicios_count, 2, 'ejercicios: sin movilidad');
+  igual(r.series_con_peso_count, 3, 'con peso: sin la del calentamiento');
+
+  const lista = await qSesiones.listarEntrenamientosCompletados('u-v');
+  const fila = lista.find((x) => x.sesion_id === res.sesion.id);
+  igual(fila.volumen_kg, 8 * 100 + 6 * 110, 'volumen en la lista de entrenamientos');
+  igual(fila.series_count, 4, 'series en la lista');
+  igual(fila.ejercicios_count, 2, 'ejercicios en la lista');
+
+  const seriesFuerza = await qSesiones.listarSeriesPorEjercicio('u-v', sentadilla);
+  igual(seriesFuerza.map((x) => x.peso_kg).join(','), '100,110', 'Fuerza sin la serie de calentamiento');
+  const conHistorial = await qSesiones.listarEjerciciosConHistorial('u-v');
+  igual(conHistorial.some((e) => e.id === movilidad), false, 'lo que fue solo calentamiento no aparece');
+  igual(conHistorial.find((e) => e.id === plancha)?.medida, 'tiempo', 'trae la medida');
+  await schema.cerrarDb();
+});
+
 // --- salida ----------------------------------------------------------------
 
 rmSync(tmp, { recursive: true, force: true });

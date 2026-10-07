@@ -270,6 +270,10 @@ export interface ResumenRutina {
   volumen_kg: number;
 }
 
+/**
+ * Totales de una sesion de gimnasio. El calentamiento no cuenta para nada, y
+ * las series por tiempo suman series pero no volumen: no tienen repeticiones.
+ */
 export async function obtenerResumenRutina(sesionId: string): Promise<ResumenRutina> {
   const fila = await getDb().getFirstAsync<{
     ejercicios_count: number;
@@ -281,9 +285,10 @@ export async function obtenerResumenRutina(sesionId: string): Promise<ResumenRut
        COUNT(DISTINCT ejercicio_id) AS ejercicios_count,
        COUNT(*) AS series_count,
        COALESCE(SUM(CASE WHEN peso_kg IS NOT NULL AND peso_kg > 0 THEN 1 ELSE 0 END), 0) AS series_con_peso_count,
-       COALESCE(SUM(CASE WHEN peso_kg IS NOT NULL AND peso_kg > 0 THEN repeticiones * peso_kg ELSE 0 END), 0) AS volumen_kg
+       COALESCE(SUM(CASE WHEN peso_kg IS NOT NULL AND peso_kg > 0 AND repeticiones IS NOT NULL
+                         THEN repeticiones * peso_kg ELSE 0 END), 0) AS volumen_kg
      FROM serie
-     WHERE sesion_id = ?`,
+     WHERE sesion_id = ? AND es_calentamiento = 0`,
     [sesionId],
   );
 
@@ -371,7 +376,8 @@ export interface SesionReciente {
 
 /**
  * Devuelve las sesiones/eventos completados del usuario en orden cronológico inverso,
- * con sus métricas calculadas (series, volumen, duración, distancia).
+ * con sus métricas calculadas (series, volumen, duración, distancia). Como en
+ * obtenerResumenRutina, sin calentamiento y sin volumen de las series por tiempo.
  */
 export async function listarEntrenamientosCompletados(
   usuarioId: string,
@@ -396,9 +402,10 @@ export async function listarEntrenamientosCompletados(
        s.bloques_completados,
        s.pasadas_completadas,
        COALESCE(rg.nombre, CASE WHEN e.tipo = 'gimnasio' AND e.notas != 'Gimnasio' THEN e.notas ELSE NULL END) AS rutina_nombre,
-       COALESCE((SELECT COUNT(*) FROM serie WHERE sesion_id = s.id), 0) AS series_count,
-       COALESCE((SELECT COUNT(DISTINCT ejercicio_id) FROM serie WHERE sesion_id = s.id), 0) AS ejercicios_count,
-       COALESCE((SELECT SUM(repeticiones * COALESCE(peso_kg, 0)) FROM serie WHERE sesion_id = s.id), 0) AS volumen_kg
+       COALESCE((SELECT COUNT(*) FROM serie WHERE sesion_id = s.id AND es_calentamiento = 0), 0) AS series_count,
+       COALESCE((SELECT COUNT(DISTINCT ejercicio_id) FROM serie WHERE sesion_id = s.id AND es_calentamiento = 0), 0) AS ejercicios_count,
+       COALESCE((SELECT SUM(repeticiones * COALESCE(peso_kg, 0)) FROM serie
+                 WHERE sesion_id = s.id AND es_calentamiento = 0 AND repeticiones IS NOT NULL), 0) AS volumen_kg
      FROM evento e
      LEFT JOIN sesion_entrenamiento s ON s.evento_id = e.id
      LEFT JOIN rutina_gimnasio rg ON rg.id = COALESCE(e.rutina_gimnasio_id, s.rutina_gimnasio_id)
@@ -416,7 +423,8 @@ export interface SerieConSesion extends SerieRow {
 
 /**
  * Devuelve unicamente los ejercicios que el usuario ya realizo en alguna serie,
- * ordenados por la fecha de la sesion mas reciente en que se hicieron.
+ * ordenados por la fecha de la sesion mas reciente en que se hicieron. Lo que
+ * solo se hizo de calentamiento no cuenta: no tiene progresion que mostrar.
  */
 export async function listarEjerciciosConHistorial(
   usuarioId: string,
@@ -428,7 +436,7 @@ export async function listarEjerciciosConHistorial(
      JOIN serie s ON s.ejercicio_id = e.id
      JOIN sesion_entrenamiento se ON se.id = s.sesion_id
      JOIN evento ev ON ev.id = se.evento_id
-     WHERE ev.usuario_id = ?
+     WHERE ev.usuario_id = ? AND s.es_calentamiento = 0
      GROUP BY e.id
      ORDER BY MAX(ev.fecha_hora_inicio) DESC, e.nombre ASC`,
     [usuarioId],
@@ -438,6 +446,8 @@ export async function listarEjerciciosConHistorial(
 /**
  * Devuelve todas las series registradas para un ejercicio especifico,
  * con la fecha y hora de la sesion correspondiente, ordenadas cronologicamente.
+ * Sin las de calentamiento: es la fuente de Fuerza y Progresion (1RM, records,
+ * volumen), y una serie liviana de entrada en calor no dice nada de eso.
  */
 export async function listarSeriesPorEjercicio(
   usuarioId: string,
@@ -451,7 +461,7 @@ export async function listarSeriesPorEjercicio(
     FROM serie s
     JOIN sesion_entrenamiento se ON se.id = s.sesion_id
     JOIN evento ev ON ev.id = se.evento_id
-    WHERE ev.usuario_id = ? AND s.ejercicio_id = ?
+    WHERE ev.usuario_id = ? AND s.ejercicio_id = ? AND s.es_calentamiento = 0
   `;
   const params: (string | number)[] = [usuarioId, ejercicioId];
 

@@ -3,7 +3,7 @@
 // Funciones puras para el analisis de fuerza y progresion de cargas en rutinas
 // de gimnasio. No tocan la base ni React, para poder probarse directo en Node.
 
-import type { SerieRow } from '@/db/schema';
+import type { MedidaEjercicio, SerieRow } from '@/db/schema';
 import { textoDuracion } from './duracion';
 import { diasEntre } from './fechas';
 
@@ -152,6 +152,62 @@ export function textoCoachFuerza(
 }
 
 // ---------------------------------------------------------------------------
+// Ejercicios por tiempo (plancha, cardio): no hay 1RM, hay mejor tiempo
+// ---------------------------------------------------------------------------
+
+export interface PuntoEvolucionTiempo {
+  fecha: string;
+  segundos: number;
+}
+
+/** La serie mas larga. Las series por repeticiones no entran. */
+export function mejorTiempoDe(series: SerieRow[]): SerieRow | null {
+  let mejor: SerieRow | null = null;
+  for (const s of series) {
+    if (s.duracion_seg === null || s.duracion_seg <= 0) continue;
+    if (mejor === null || s.duracion_seg > (mejor.duracion_seg ?? 0)) mejor = s;
+  }
+  return mejor;
+}
+
+/**
+ * Mejor tiempo de cada dia, ordenado por fecha. Es el equivalente de
+ * evolucion1RM para los ejercicios por tiempo y va en el mismo grafico.
+ */
+export function evolucionTiempo(series: SerieConFecha[]): PuntoEvolucionTiempo[] {
+  const mejorPorDia = new Map<string, number>();
+  for (const s of series) {
+    if (s.duracion_seg === null || s.duracion_seg <= 0) continue;
+    const actual = mejorPorDia.get(s.fecha);
+    if (actual === undefined || s.duracion_seg > actual) mejorPorDia.set(s.fecha, s.duracion_seg);
+  }
+  return Array.from(mejorPorDia.keys())
+    .sort((a, b) => a.localeCompare(b))
+    .map((fecha) => ({ fecha, segundos: mejorPorDia.get(fecha)! }));
+}
+
+/** El texto del coach para un ejercicio por tiempo. Mismo tono que textoCoachFuerza. */
+export function textoCoachTiempo(
+  evolucion: PuntoEvolucionTiempo[],
+  nombreEjercicio: string,
+): string | null {
+  if (evolucion.length < 2) return null;
+
+  const primerPunto = evolucion[0];
+  const ultimoPunto = evolucion[evolucion.length - 1];
+  const delta = ultimoPunto.segundos - primerPunto.segundos;
+  const dias = Math.max(1, diasEntre(primerPunto.fecha, ultimoPunto.fecha));
+  const semanas = Math.max(1, Math.round(dias / 7));
+  const periodoTexto =
+    semanas === 1 ? 'en la ultima semana' : `en las ultimas ${semanas} semanas`;
+  const nombre = nombreEjercicio.toLowerCase();
+
+  if (delta === 0) return `Mismo mejor tiempo en ${nombre} ${periodoTexto}.`;
+  if (delta > 0) return `Tu mejor tiempo en ${nombre} subio ${textoDuracion(delta)} ${periodoTexto}.`;
+  return `Tu mejor tiempo en ${nombre} bajo ${textoDuracion(-delta)} ${periodoTexto}.`;
+}
+
+// ---------------------------------------------------------------------------
 // Lista de ejercicios por rutina (pantalla 1 de Fuerza y Progresion)
 // ---------------------------------------------------------------------------
 
@@ -164,16 +220,45 @@ export interface ResumenFilaEjercicio {
   tendencia: Tendencia | null;
   /** Fecha de la sesion mas reciente con este ejercicio. */
   ultimaFecha: string | null;
-  /** Para los ejercicios sin 1RM (peso corporal, mas de 12 reps). */
+  /**
+   * Para los ejercicios sin 1RM (peso corporal, mas de 12 reps). En los por
+   * tiempo, la serie mas larga.
+   */
   mejorSerie: SerieRow | null;
 }
 
 /**
  * Lo que entra en una fila de la lista: sin grafico ni historial, solo lo que
  * dice de un vistazo como viene el ejercicio. La tolerancia de 0,5 kg es la
- * misma que usa textoCoachFuerza para "mismo nivel".
+ * misma que usa textoCoachFuerza para "mismo nivel". En los ejercicios por
+ * tiempo la tendencia sale del mejor tiempo de cada dia, y no hay 1RM.
  */
-export function resumenFilaEjercicio(series: SerieConFecha[]): ResumenFilaEjercicio {
+export function resumenFilaEjercicio(
+  series: SerieConFecha[],
+  medida: MedidaEjercicio = 'repeticiones',
+): ResumenFilaEjercicio {
+  let ultimaFecha: string | null = null;
+  for (const s of series) {
+    if (ultimaFecha === null || s.fecha > ultimaFecha) ultimaFecha = s.fecha;
+  }
+
+  if (medida === 'tiempo') {
+    const evo = evolucionTiempo(series);
+    const ultimo = evo[evo.length - 1] ?? null;
+    const previo = evo[evo.length - 2] ?? null;
+    let tendencia: Tendencia | null = null;
+    if (ultimo && previo) {
+      const delta = ultimo.segundos - previo.segundos;
+      tendencia = delta === 0 ? 'igual' : delta > 0 ? 'sube' : 'baja';
+    }
+    return {
+      unRM: null,
+      tendencia,
+      ultimaFecha,
+      mejorSerie: mejorTiempoDe(series),
+    };
+  }
+
   const evo = evolucion1RM(series);
   const ultimo = evo[evo.length - 1] ?? null;
   const previo = evo[evo.length - 2] ?? null;
@@ -182,11 +267,6 @@ export function resumenFilaEjercicio(series: SerieConFecha[]): ResumenFilaEjerci
   if (ultimo && previo) {
     const delta = ultimo.estimado - previo.estimado;
     tendencia = Math.abs(delta) < 0.5 ? 'igual' : delta > 0 ? 'sube' : 'baja';
-  }
-
-  let ultimaFecha: string | null = null;
-  for (const s of series) {
-    if (ultimaFecha === null || s.fecha > ultimaFecha) ultimaFecha = s.fecha;
   }
 
   return {
