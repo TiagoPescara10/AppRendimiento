@@ -44,7 +44,6 @@ import { FotoDetalleComida } from '@/features/foto/components/FotoComida';
 import { SheetGuardarReceta } from '@/features/comidas/components/SheetGuardarReceta';
 import { guardarComidaComoReceta } from '@/db/queries/recetas';
 import { agruparPorReceta, textoPorciones } from '@/lib/recetas';
-import { Toast } from '@/ui/Toast';
 import { Ionicons } from '@expo/vector-icons';
 
 function capitalizar(texto: string): string {
@@ -128,7 +127,8 @@ export default function DetalleComida() {
   // Grupos de receta abiertos, por receta_grupo
   const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
   const [guardandoReceta, setGuardandoReceta] = useState(false);
-  const [aviso, setAviso] = useState<{ texto: string; clave: number } | null>(null);
+  // Una vez guardada, el boton queda en "Receta guardada": no se ofrece de nuevo
+  const [recetaGuardada, setRecetaGuardada] = useState(false);
 
   /**
    * Recarga todo desde la base.
@@ -226,7 +226,7 @@ export default function DetalleComida() {
     setGuardandoReceta(false);
     try {
       await guardarComidaComoReceta({ comidaId: comida.id, usuarioId: comida.usuario_id, nombre });
-      setAviso({ texto: 'Receta guardada', clave: Date.now() });
+      setRecetaGuardada(true);
     } catch (e) {
       console.error('Error al guardar la receta:', e);
       Alert.alert('Error', 'No se pudo guardar la receta.');
@@ -315,7 +315,6 @@ export default function DetalleComida() {
   };
 
   return (
-    <View style={estilos.flex}>
     <Pantalla>
       <View style={estilos.header}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
@@ -374,12 +373,18 @@ export default function DetalleComida() {
         </View>
       )}
 
-      {items.length > 0 && (
-        <Pressable style={estilos.guardarReceta} onPress={() => setGuardandoReceta(true)}>
-          <Ionicons name="bookmark-outline" size={18} color={colors.action} />
-          <Text style={estilos.guardarRecetaTexto}>Guardar como receta</Text>
-        </Pressable>
-      )}
+      {items.length > 0 &&
+        (recetaGuardada ? (
+          <View style={estilos.guardarReceta}>
+            <Ionicons name="checkmark-circle" size={18} color={colors.textSecondary} />
+            <Text style={estilos.recetaGuardadaTexto}>Receta guardada</Text>
+          </View>
+        ) : (
+          <Pressable style={estilos.guardarReceta} onPress={() => setGuardandoReceta(true)}>
+            <Ionicons name="bookmark-outline" size={18} color={colors.action} />
+            <Text style={estilos.guardarRecetaTexto}>Guardar como receta</Text>
+          </Pressable>
+        ))}
 
       <Pressable style={estilos.borrar} onPress={borrarComida}>
         <Text style={estilos.borrarTexto}>Borrar esta comida</Text>
@@ -397,9 +402,6 @@ export default function DetalleComida() {
         onGuardar={(nombre) => void guardarComoReceta(nombre)}
       />
     </Pantalla>
-
-    <Toast mensaje={aviso?.texto ?? null} clave={aviso?.clave} onOculto={() => setAviso(null)} />
-    </View>
   );
 }
 
@@ -449,6 +451,11 @@ const estilos = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   guardarRecetaTexto: { fontSize: fontSize.body, fontWeight: fontWeight.medium, color: colors.action },
+  recetaGuardadaTexto: {
+    fontSize: fontSize.body,
+    fontWeight: fontWeight.medium,
+    color: colors.textSecondary,
+  },
 
   alimentoNombre: {
     fontSize: fontSize.body,
