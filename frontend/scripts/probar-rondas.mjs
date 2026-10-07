@@ -36,7 +36,10 @@ writeFileSync(
       baseUrl: RAIZ,
       paths: { '@/*': ['src/*'] },
     },
-    include: [join(RAIZ, 'src/lib/superseries.ts')],
+    include: [
+      join(RAIZ, 'src/lib/superseries.ts'),
+      join(RAIZ, 'src/features/entrenamiento/rondas.ts'),
+    ],
   }),
 );
 
@@ -49,6 +52,7 @@ try {
 
 const req = createRequire(join(build, 'x.cjs'));
 const S = req('./lib/superseries.js');
+const R = req('./features/entrenamiento/rondas.js');
 
 process.on('exit', () => {
   try {
@@ -139,6 +143,78 @@ prueba('ida y vuelta con la base: filas con grupo, unidades y datos', () => {
   igual(S.aplanar(u).map((f) => f.id).join(''), 'ABCDEFG', 'aplanar');
   // Un grupo de uno en la base (dato viejo o a mano) se lee suelto
   igual(S.aDatos(S.unidadesDesdeFilas([{ id: 'A', g: 5 }], (f) => f.g), (f) => f.id), ['A'], 'grupo de uno');
+});
+
+// ---------------------------------------------------------------------------
+// Rondas al entrenar
+// ---------------------------------------------------------------------------
+
+console.log('\nrondas al entrenar:');
+
+// Arma la lista: { A: 3 } es un ejercicio A con 3 series A1..A3. unidad
+// agrupa; las series confirmadas se pasan por id.
+function sesion(unidades, confirmadas = []) {
+  const lista = [];
+  for (const [unidad, ejercicios] of unidades) {
+    for (const [clave, n] of Object.entries(ejercicios)) {
+      lista.push({
+        clave,
+        unidad,
+        series: Array.from({ length: n }, (_, i) => ({
+          id: `${clave}${i + 1}`,
+          confirmada: confirmadas.includes(`${clave}${i + 1}`),
+        })),
+      });
+    }
+  }
+  return lista;
+}
+
+/** Confirma desde `inicio` siguiendo el foco hasta el final y devuelve el recorrido. */
+function recorrido(unidades, inicio, confirmadas = []) {
+  const hechas = [...confirmadas];
+  const pasos = [inicio];
+  let actual = { clave: inicio.replace(/\d+$/, ''), serieId: inicio };
+  for (let guarda = 0; guarda < 50; guarda++) {
+    const sig = R.siguienteFoco(sesion(unidades, hechas), actual.clave, actual.serieId);
+    hechas.push(actual.serieId);
+    if (!sig) break;
+    pasos.push(sig.serieId);
+    actual = sig;
+  }
+  return pasos.join(' ');
+}
+
+prueba('superserie de dos ejercicios iguales: A1 B1 A2 B2 A3 B3', () => {
+  igual(recorrido([['g1', { A: 3, B: 3 }]], 'A1'), 'A1 B1 A2 B2 A3 B3', 'ronda');
+});
+
+prueba('circuito de tres: A1 B1 C1 A2 B2 C2', () => {
+  igual(recorrido([['g1', { A: 2, B: 2, C: 2 }]], 'A1'), 'A1 B1 C1 A2 B2 C2', 'circuito');
+});
+
+prueba('cantidades distintas: el que termina antes se saltea', () => {
+  igual(recorrido([['g1', { A: 4, B: 2 }]], 'A1'), 'A1 B1 A2 B2 A3 A4', 'A tiene mas');
+  igual(recorrido([['g1', { A: 1, B: 3, C: 2 }]], 'A1'), 'A1 B1 C1 B2 C2 B3', 'tres desparejos');
+});
+
+prueba('una serie cargada fuera de orden: al volver al ejercicio va a la primera pendiente', () => {
+  // Ya estan A1 y B1; el usuario toca A3 y la confirma salteando A2
+  const lista = sesion([['g1', { A: 3, B: 3 }]], ['A1', 'B1']);
+  igual(R.siguienteFoco(lista, 'A', 'A3'), { clave: 'B', serieId: 'B2' }, 'despues de A3 va a B');
+  const despues = sesion([['g1', { A: 3, B: 3 }]], ['A1', 'B1', 'A3']);
+  igual(R.siguienteFoco(despues, 'B', 'B2'), { clave: 'A', serieId: 'A2' }, 'y despues de B2 vuelve a A2');
+});
+
+prueba('terminado el grupo pasa a la siguiente unidad, y al final da la vuelta', () => {
+  const unidades = [['s0', { X: 1 }], ['g1', { A: 2, B: 2 }], ['s2', { Y: 2 }]];
+  igual(recorrido(unidades, 'A1'), 'A1 B1 A2 B2 Y1 Y2 X1', 'grupo, suelto y vuelta');
+});
+
+prueba('un suelto se comporta como antes: su serie siguiente, despues el proximo ejercicio', () => {
+  const unidades = [['s0', { A: 3 }], ['s1', { B: 2 }]];
+  igual(recorrido(unidades, 'A1'), 'A1 A2 A3 B1 B2', 'sueltos');
+  igual(R.siguienteFoco(sesion(unidades, ['A1', 'A2', 'A3', 'B1']), 'B', 'B2'), null, 'nada pendiente');
 });
 
 // --- resumen final ---------------------------------------------------------

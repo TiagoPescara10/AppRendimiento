@@ -12,6 +12,10 @@
 // - Fila en edicion con alto contraste (borde 2px action, fondo acentuado).
 // - Scroll suave automatico al saltar al siguiente ejercicio.
 // - Keypad numerico tactil integrado al pie con shadow.sheet y atajos rapidos (+1.25, +2.5, +5, Corporal).
+// - Superseries y circuitos: los ejercicios de un grupo van en un recuadro,
+//   abiertos a la vez, y el foco avanza en ronda (A1 -> B1 -> A2...). El
+//   acordeon de "uno abierto por vez" aplica a unidades (grupo o suelto). El
+//   orden sale de src/features/entrenamiento/rondas.ts.
 // - Sin timers de descanso. El unico cronometro es el de las series por tiempo
 //   (plancha, cardio): cuenta hacia arriba mientras se hace el ejercicio y al
 //   parar carga el tiempo en la serie. Ver useCronometroSerie.ts.
@@ -61,6 +65,8 @@ import {
   textoDuracion,
 } from '@/lib/duracion';
 import { useCronometroSerie } from '@/features/entrenamiento/useCronometroSerie';
+import { siguienteFoco } from '@/features/entrenamiento/rondas';
+import { etiquetaGrupo } from '@/lib/superseries';
 import { Pantalla } from '@/ui/Pantalla';
 import { Boton } from '@/ui/Boton';
 import { randomUUID } from '@/db/sync/uuid';
@@ -146,8 +152,18 @@ interface EjercicioEnSesion {
    */
   clave: string;
   bloque: BloqueRutina;
+  /** Superserie o circuito de la rutina. null = suelto. */
+  grupo: number | null;
   ejercicio: EjercicioRow;
   series: SerieBorrador[];
+}
+
+/**
+ * La unidad del acordeon: un grupo entero o un ejercicio suelto. Los de un
+ * grupo comparten unidad y se abren juntos.
+ */
+function unidadDe(item: EjercicioEnSesion): string {
+  return item.grupo === null ? item.clave : `g:${item.bloque}:${item.grupo}`;
 }
 
 interface SeleccionSerie {
@@ -297,7 +313,7 @@ export default function SesionRutina() {
               series.push(serieDesdePrevia(previas[i]));
             }
 
-            return { clave, bloque: ej.bloque, ejercicio: ej, series };
+            return { clave, bloque: ej.bloque, grupo: ej.grupo_rutina, ejercicio: ej, series };
           });
 
           setEjerciciosSesion(inicial);
@@ -305,7 +321,7 @@ export default function SesionRutina() {
           // Desplegar el primer ejercicio y enfocar su primera serie
           if (inicial.length > 0) {
             const primerEj = inicial[0];
-            setEjercicioExpandidoId(primerEj.clave);
+            setEjercicioExpandidoId(unidadDe(primerEj));
             if (primerEj.series.length > 0) {
               setSerieActiva({
                 clave: primerEj.clave,
@@ -378,6 +394,7 @@ export default function SesionRutina() {
     const nuevoItem: EjercicioEnSesion = {
       clave,
       bloque: 'principal',
+      grupo: null,
       ejercicio: ej,
       series: nuevasSeries,
     };
@@ -415,25 +432,24 @@ export default function SesionRutina() {
     }
   };
 
-  // Alternar acordeon de ejercicio
-  const toggleAcordeon = (clave: string) => {
-    if (ejercicioExpandidoId === clave) {
+  // Alternar acordeon de una unidad (ejercicio suelto o grupo entero)
+  const toggleAcordeon = (unidad: string) => {
+    if (ejercicioExpandidoId === unidad) {
       setEjercicioExpandidoId(null);
       setSerieActiva(null);
     } else {
-      setEjercicioExpandidoId(clave);
-      const item = ejerciciosSesion.find((e) => e.clave === clave);
-      if (item && item.series.length > 0) {
-        // Al abrir un ejercicio, enfocar la primera serie pendiente si existe
-        const pendiente = item.series.find((s) => !s.confirmada) ?? null;
+      setEjercicioExpandidoId(unidad);
+      // Al abrir, enfocar la primera serie pendiente de la unidad, en orden
+      for (const item of ejerciciosSesion.filter((e) => unidadDe(e) === unidad)) {
+        const pendiente = item.series.find((s) => !s.confirmada);
         if (pendiente) {
-          setSerieActiva({ clave, serieId: pendiente.id });
-          setCampoActivo(campoInicial(item.ejercicio, referenciasPrevias.get(clave)));
-        } else {
-          // Si todas estan confirmadas, no abrir el keypad hasta que toque explicitamente
-          setSerieActiva(null);
+          setSerieActiva({ clave: item.clave, serieId: pendiente.id });
+          setCampoActivo(campoInicial(item.ejercicio, referenciasPrevias.get(item.clave)));
+          return;
         }
       }
+      // Si todo esta confirmado, no abrir el keypad hasta que toque explicitamente
+      setSerieActiva(null);
     }
   };
 
@@ -460,10 +476,8 @@ export default function SesionRutina() {
   // Quitar ejercicio
   const quitarEjercicio = (clave: string) => {
     setEjerciciosSesion((prev) => prev.filter((item) => item.clave !== clave));
-    if (ejercicioExpandidoId === clave) {
-      setEjercicioExpandidoId(null);
-      setSerieActiva(null);
-    }
+    if (serieActiva?.clave === clave) setSerieActiva(null);
+    if (ejercicioExpandidoId === clave) setEjercicioExpandidoId(null);
   };
 
   // ---------------------------------------------------------------------------
@@ -674,7 +688,8 @@ export default function SesionRutina() {
       }
 
       if (siguientePendiente) {
-        setEjercicioExpandidoId(siguientePendiente.claveEj);
+        const destino = ejerciciosSesion.find((e) => e.clave === siguientePendiente.claveEj);
+        if (destino) setEjercicioExpandidoId(unidadDe(destino));
         setSerieActiva({ clave: siguientePendiente.claveEj, serieId: siguientePendiente.serieId });
         setCampoActivo(siguientePendiente.campo);
       } else {
@@ -684,64 +699,36 @@ export default function SesionRutina() {
       return;
     }
 
-    // CASO SERIE PENDIENTE NUEVA: Auto-avance progresivo
-    const ejIdx = ejerciciosSesion.findIndex((e) => e.clave === serieActiva.clave);
-    if (ejIdx < 0) return;
+    // CASO SERIE PENDIENTE NUEVA: avance en ronda dentro de la unidad, y
+    // despues a la siguiente unidad con pendientes (ver rondas.ts)
+    const foco = siguienteFoco(
+      ejerciciosSesion.map((e) => ({ clave: e.clave, unidad: unidadDe(e), series: e.series })),
+      serieActiva.clave,
+      serieActiva.serieId,
+    );
+    const destino = foco ? ejerciciosSesion.find((e) => e.clave === foco.clave) : undefined;
 
-    const seriesDelEj = ejerciciosSesion[ejIdx].series;
-    const serieIdx = seriesDelEj.findIndex((s) => s.id === serieActiva.serieId);
-
-    // 1. Hay siguiente serie en este mismo ejercicio?
-    if (serieIdx >= 0 && serieIdx < seriesDelEj.length - 1) {
-      const prox = seriesDelEj[serieIdx + 1];
-      setSerieActiva({
-        clave: serieActiva.clave,
-        serieId: prox.id,
-      });
-      setCampoActivo(campoInicial(itemActivo.ejercicio, referenciasPrevias.get(itemActivo.clave)));
-      return;
-    }
-
-    // 2. Era la ultima serie de este ejercicio. Buscar siguiente ejercicio con series incompletas:
-    let proxEjercicio: EjercicioEnSesion | null = null;
-    for (let i = ejIdx + 1; i < ejerciciosSesion.length; i++) {
-      if (ejerciciosSesion[i].series.some((s) => !s.confirmada)) {
-        proxEjercicio = ejerciciosSesion[i];
-        break;
-      }
-    }
-    if (!proxEjercicio) {
-      for (let i = 0; i < ejIdx; i++) {
-        if (ejerciciosSesion[i].series.some((s) => !s.confirmada)) {
-          proxEjercicio = ejerciciosSesion[i];
-          break;
-        }
-      }
-    }
-
-    if (proxEjercicio) {
-      const proxEjId = proxEjercicio.clave;
-      setEjercicioExpandidoId(proxEjId);
-      const primeraPendiente =
-        proxEjercicio.series.find((s) => !s.confirmada) ?? proxEjercicio.series[0];
-      setSerieActiva({
-        clave: proxEjId,
-        serieId: primeraPendiente.id,
-      });
-      setCampoActivo(campoInicial(proxEjercicio.ejercicio, referenciasPrevias.get(proxEjId)));
-
-      // Scroll suave hacia el nuevo ejercicio recien desplegado
-      setTimeout(() => {
-        const posY = posicionesY.current[proxEjId];
-        if (posY !== undefined && scrollRef.current) {
-          scrollRef.current.scrollTo({ y: Math.max(0, posY - spacing.sm), animated: true });
-        }
-      }, 70);
-    } else {
+    if (!foco || !destino) {
       // Caso limite: completada la ultima serie del ultimo ejercicio.
       // Colapsar todo, cerrar keypad y dejar visible "Finalizar".
       setEjercicioExpandidoId(null);
       setSerieActiva(null);
+      return;
+    }
+
+    setSerieActiva(foco);
+    setCampoActivo(campoInicial(destino.ejercicio, referenciasPrevias.get(destino.clave)));
+
+    const unidadDestino = unidadDe(destino);
+    if (unidadDestino !== unidadDe(itemActivo)) {
+      setEjercicioExpandidoId(unidadDestino);
+      // Scroll suave hacia la unidad recien desplegada
+      setTimeout(() => {
+        const posY = posicionesY.current[unidadDestino];
+        if (posY !== undefined && scrollRef.current) {
+          scrollRef.current.scrollTo({ y: Math.max(0, posY - spacing.sm), animated: true });
+        }
+      }, 70);
     }
   };
 
@@ -882,95 +869,30 @@ export default function SesionRutina() {
     );
   }
 
-  return (
-    <View style={estilos.contenedorPrincipal}>
-      {/* 1. Header fijo */}
-      <View style={[estilos.headerFijo, { paddingTop: insets.top + spacing.xs }]}>
-        <View style={estilos.headerTopFila}>
-          <Pressable onPress={salir} hitSlop={12} style={estilos.botonVolver}>
-            <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
-          </Pressable>
+  // Una tarjeta de ejercicio con su tabla de series. Adentro de un grupo se
+  // abre y cierra con el recuadro, no por su cuenta.
+  const renderTarjeta = (item: EjercicioEnSesion, expandido: boolean, enGrupo: boolean) => {
+    const claveEj = item.clave;
+    const previas = referenciasPrevias.get(claveEj) ?? [];
+    const pendientes = item.series.filter((s) => !s.confirmada).length;
+    const completado = item.series.length > 0 && pendientes === 0;
+    const porTiempo = esPorTiempo(item.ejercicio);
 
-          <View style={estilos.headerTituloContenedor}>
-            <Text style={estilos.headerTitulo} numberOfLines={1}>
-              {nombreRutina ?? 'Rutina libre'}
-            </Text>
-            <Text style={estilos.headerSubtitulo}>
-              {ejerciciosCompletados} de {totalEjercicios} ejercicios completados
-            </Text>
-          </View>
-
-          <Pressable
-            style={[estilos.botonFinalizar, guardando && estilos.botonFinalizarDeshabilitado]}
-            onPress={finalizarSesion}
-            disabled={guardando}
-          >
-            <Text style={estilos.botonFinalizarTexto}>
-              {guardando ? 'Guardando...' : 'Finalizar'}
-            </Text>
-          </Pressable>
-        </View>
-
-        {/* Barra horizontal de progreso */}
-        <View style={estilos.barraFondo}>
-          <View style={[estilos.barraRelleno, { width: `${Math.round(progresoRatio * 100)}%` }]} />
-        </View>
-      </View>
-
-      {/* 2. Scroll de lista de ejercicios */}
-      <ScrollView
-        ref={scrollRef}
-        style={estilos.scrollArea}
-        contentContainerStyle={[
-          estilos.scrollContenido,
-          { paddingBottom: serieActiva ? 380 : spacing.xxxl },
-        ]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {ejerciciosSesion.length === 0 ? (
-          <View style={estilos.cardVacia}>
-            <Ionicons name="barbell-outline" size={36} color={colors.textMuted} />
-            <Text style={estilos.cardVaciaTitulo}>Rutina sin ejercicios</Text>
-            <Text style={estilos.cardVaciaTexto}>
-              Tocá "+ Agregar ejercicio" para comenzar a armar tu sesión.
-            </Text>
-          </View>
-        ) : (
-          ejerciciosSesion.map((item, idx) => {
-            const claveEj = item.clave;
-            // Con calentamiento, cada bloque lleva su titulo. Sin el, la lista
-            // queda como siempre.
-            const tituloBloque =
-              hayCalentamiento && (idx === 0 || ejerciciosSesion[idx - 1].bloque !== item.bloque)
-                ? item.bloque === 'calentamiento'
-                  ? 'Calentamiento'
-                  : 'Principal'
-                : null;
-            const expandido = ejercicioExpandidoId === claveEj;
-            const previas = referenciasPrevias.get(claveEj) ?? [];
-            const pendientes = item.series.filter((s) => !s.confirmada).length;
-            const completado = item.series.length > 0 && pendientes === 0;
-            const porTiempo = esPorTiempo(item.ejercicio);
-
-            return (
+    return (
               <View
                 key={claveEj}
-                onLayout={(e) => {
-                  posicionesY.current[claveEj] = e.nativeEvent.layout.y;
-                }}
-              >
-              {tituloBloque && <Text style={estilos.tituloBloque}>{tituloBloque}</Text>}
-              <View
                 style={[
                   estilos.acordeonCard,
                   expandido && estilos.acordeonCardExpandido,
+                  enGrupo && estilos.acordeonCardEnGrupo,
                 ]}
               >
                 {/* Cabecera del acordeon */}
+                {/* En un grupo la cabecera no pliega: abre y cierra el recuadro entero */}
                 <Pressable
                   style={estilos.acordeonCabecera}
-                  onPress={() => toggleAcordeon(claveEj)}
+                  onPress={() => toggleAcordeon(unidadDe(item))}
+                  disabled={enGrupo}
                 >
                   <View style={estilos.acordeonInfo}>
                     <Text style={estilos.acordeonTitulo}>{item.ejercicio.nombre}</Text>
@@ -988,11 +910,13 @@ export default function SesionRutina() {
                     )}
                   </View>
 
-                  <Ionicons
-                    name={expandido ? 'chevron-up' : 'chevron-down'}
-                    size={20}
-                    color={colors.textSecondary}
-                  />
+                  {!enGrupo && (
+                    <Ionicons
+                      name={expandido ? 'chevron-up' : 'chevron-down'}
+                      size={20}
+                      color={colors.textSecondary}
+                    />
+                  )}
                 </Pressable>
 
                 {/* Contenido desplegado: tabla de series */}
@@ -1229,6 +1153,123 @@ export default function SesionRutina() {
                   </View>
                 )}
               </View>
+    );
+  };
+
+  // Las tarjetas agrupadas por unidad, en el orden de la sesion. Un grupo es
+  // consecutivo, asi que alcanza con cortar cuando cambia la unidad.
+  const unidadesSesion: { clave: string; items: EjercicioEnSesion[] }[] = [];
+  for (const item of ejerciciosSesion) {
+    const u = unidadDe(item);
+    const ultima = unidadesSesion[unidadesSesion.length - 1];
+    if (ultima && ultima.clave === u) ultima.items.push(item);
+    else unidadesSesion.push({ clave: u, items: [item] });
+  }
+
+  return (
+    <View style={estilos.contenedorPrincipal}>
+      {/* 1. Header fijo */}
+      <View style={[estilos.headerFijo, { paddingTop: insets.top + spacing.xs }]}>
+        <View style={estilos.headerTopFila}>
+          <Pressable onPress={salir} hitSlop={12} style={estilos.botonVolver}>
+            <Ionicons name="arrow-back" size={20} color={colors.textPrimary} />
+          </Pressable>
+
+          <View style={estilos.headerTituloContenedor}>
+            <Text style={estilos.headerTitulo} numberOfLines={1}>
+              {nombreRutina ?? 'Rutina libre'}
+            </Text>
+            <Text style={estilos.headerSubtitulo}>
+              {ejerciciosCompletados} de {totalEjercicios} ejercicios completados
+            </Text>
+          </View>
+
+          <Pressable
+            style={[estilos.botonFinalizar, guardando && estilos.botonFinalizarDeshabilitado]}
+            onPress={finalizarSesion}
+            disabled={guardando}
+          >
+            <Text style={estilos.botonFinalizarTexto}>
+              {guardando ? 'Guardando...' : 'Finalizar'}
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Barra horizontal de progreso */}
+        <View style={estilos.barraFondo}>
+          <View style={[estilos.barraRelleno, { width: `${Math.round(progresoRatio * 100)}%` }]} />
+        </View>
+      </View>
+
+      {/* 2. Scroll de lista de ejercicios */}
+      <ScrollView
+        ref={scrollRef}
+        style={estilos.scrollArea}
+        contentContainerStyle={[
+          estilos.scrollContenido,
+          { paddingBottom: serieActiva ? 380 : spacing.xxxl },
+        ]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {ejerciciosSesion.length === 0 ? (
+          <View style={estilos.cardVacia}>
+            <Ionicons name="barbell-outline" size={36} color={colors.textMuted} />
+            <Text style={estilos.cardVaciaTitulo}>Rutina sin ejercicios</Text>
+            <Text style={estilos.cardVaciaTexto}>
+              Tocá "+ Agregar ejercicio" para comenzar a armar tu sesión.
+            </Text>
+          </View>
+        ) : (
+          unidadesSesion.map((unidad, uIdx) => {
+            const primero = unidad.items[0];
+            // Con calentamiento, cada bloque lleva su titulo. Sin el, la lista
+            // queda como siempre.
+            const tituloBloque =
+              hayCalentamiento &&
+              (uIdx === 0 || unidadesSesion[uIdx - 1].items[0].bloque !== primero.bloque)
+                ? primero.bloque === 'calentamiento'
+                  ? 'Calentamiento'
+                  : 'Principal'
+                : null;
+            const expandido = ejercicioExpandidoId === unidad.clave;
+            const pendientesGrupo = unidad.items.reduce(
+              (n, e) => n + e.series.filter((s) => !s.confirmada).length,
+              0,
+            );
+
+            return (
+              <View
+                key={unidad.clave}
+                onLayout={(e) => {
+                  posicionesY.current[unidad.clave] = e.nativeEvent.layout.y;
+                }}
+              >
+                {tituloBloque && <Text style={estilos.tituloBloque}>{tituloBloque}</Text>}
+                {unidad.items.length > 1 ? (
+                  <View style={[estilos.grupoCaja, expandido && estilos.grupoCajaExpandida]}>
+                    <Pressable
+                      style={estilos.grupoCabecera}
+                      onPress={() => toggleAcordeon(unidad.clave)}
+                    >
+                      <Ionicons name="link-outline" size={16} color={colors.action} />
+                      <Text style={estilos.grupoEtiqueta}>{etiquetaGrupo(unidad.items.length)}</Text>
+                      <Text style={estilos.grupoPendientes}>
+                        {pendientesGrupo === 0
+                          ? 'Completado'
+                          : `${pendientesGrupo} ${pendientesGrupo === 1 ? 'pendiente' : 'pendientes'}`}
+                      </Text>
+                      <Ionicons
+                        name={expandido ? 'chevron-up' : 'chevron-down'}
+                        size={20}
+                        color={colors.textSecondary}
+                      />
+                    </Pressable>
+                    {unidad.items.map((item) => renderTarjeta(item, expandido, true))}
+                  </View>
+                ) : (
+                  renderTarjeta(primero, expandido, false)
+                )}
               </View>
             );
           })
@@ -1842,6 +1883,41 @@ const estilos = StyleSheet.create({
     borderTopColor: colors.border,
     padding: spacing.md,
     backgroundColor: colors.surface,
+  },
+
+  // Superserie o circuito: recuadro con sus ejercicios abiertos a la vez
+  grupoCaja: {
+    gap: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  grupoCajaExpandida: {
+    borderColor: colors.action,
+    backgroundColor: colors.accentSoft,
+  },
+  grupoCabecera: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.xs,
+  },
+  grupoEtiqueta: {
+    flex: 1,
+    fontSize: fontSize.small,
+    fontWeight: '700',
+    color: colors.action,
+  },
+  grupoPendientes: {
+    fontSize: fontSize.caption,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  acordeonCardEnGrupo: {
+    shadowOpacity: 0,
+    elevation: 0,
   },
 
   // Titulo de bloque (Calentamiento / Principal) sobre las tarjetas
