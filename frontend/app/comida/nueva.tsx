@@ -7,14 +7,14 @@ import { View, Text, Pressable, StyleSheet, Alert, Modal, TextInput } from 'reac
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import { Pantalla } from '@/ui/Pantalla';
-import { Input } from '@/ui/Input';
 import { Boton } from '@/ui/Boton';
 import { SheetPorciones } from '@/features/comidas/components/SheetPorciones';
 import type { DatosSheet } from '@/features/comidas/components/SheetPorciones';
-import { esProbableBebida, obtenerPorcionesBebidaEstandar } from '@/features/comidas/porciones';
-import { colors, spacing, radius, fontSize, fontWeight, lineHeight, shadow, sizes } from '@/ui/theme';
+import { BuscadorAlimentos } from '@/features/comidas/components/BuscadorAlimentos';
+import { TarjetaTotales } from '@/features/comidas/components/TarjetaTotales';
+import { TIPOS_COMIDA, tipoPorHora } from '@/features/comidas/tipos';
+import { colors, spacing, radius, fontSize, lineHeight, shadow } from '@/ui/theme';
 
-import { buscarAlimentosPorNombre, guardarAlimento } from '@/db/queries/alimentos';
 import type { Alimento } from '@/db/queries/alimentos';
 import { crearComidaConItems } from '@/db/queries/comidas';
 import type { CargaCoccion } from '@/db/queries/comidas';
@@ -38,16 +38,7 @@ type ItemPendiente = {
   carga: CargaCoccion | null;
 };
 
-const TIPOS: TipoComida[] = ['desayuno', 'almuerzo', 'merienda', 'cena', 'snack'];
-
-/** El tipo mas probable segun la hora. El usuario lo puede cambiar. */
-function tipoPorHora(): TipoComida {
-  const h = new Date().getHours();
-  if (h < 11) return 'desayuno';
-  if (h < 15) return 'almuerzo';
-  if (h < 19) return 'merienda';
-  return 'cena';
-}
+const TIPOS = TIPOS_COMIDA;
 
 function kcalDe(alimento: Alimento, gramos: number): number {
   return Math.round((alimento.kcal_por_100g * gramos) / 100);
@@ -74,7 +65,6 @@ export default function NuevaComida() {
   );
   const [selectorAbierto, setSelectorAbierto] = useState(false);
   const [busqueda, setBusqueda] = useState(params.busqueda ?? '');
-  const [resultados, setResultados] = useState<Alimento[]>([]);
   const [items, setItems] = useState<ItemPendiente[]>([]);
   const [guardando, setGuardando] = useState(false);
   const buscador = useRef<TextInput>(null);
@@ -87,42 +77,13 @@ export default function NuevaComida() {
     return () => clearTimeout(t);
   }, [params.enfocar]);
 
-  // Modal para dar de alta alimento manual si no esta en catalogo
-  const [modalAltaManual, setModalAltaManual] = useState(false);
-  const [altaNombre, setAltaNombre] = useState(params.busqueda ?? '');
-  const [altaMarca, setAltaMarca] = useState(params.marca ?? '');
-  const [altaKcal, setAltaKcal] = useState('');
-  const [altaProt, setAltaProt] = useState('');
-  const [altaCarb, setAltaCarb] = useState('');
-  const [altaGrasa, setAltaGrasa] = useState('');
-
   // Actualizar si cambian los params de navegacion
   useEffect(() => {
-    if (params.busqueda) {
-      setBusqueda(params.busqueda);
-      setAltaNombre(params.busqueda);
-    }
-    if (params.marca) {
-      setAltaMarca(params.marca);
-    }
-  }, [params.busqueda, params.marca]);
+    if (params.busqueda) setBusqueda(params.busqueda);
+  }, [params.busqueda]);
 
   // El sheet sirve para agregar (indice null) o editar (indice = posicion).
   const [sheet, setSheet] = useState<{ alimento: Alimento; indice: number | null } | null>(null);
-
-  // Busqueda. Contra 318 filas locales es instantanea, asi que no hace falta
-  // debounce. El flag `vivo` evita que una respuesta vieja pise a una nueva.
-  useEffect(() => {
-    if (!busqueda.trim()) {
-      setResultados([]);
-      return;
-    }
-    let vivo = true;
-    buscarAlimentosPorNombre(busqueda)
-      .then((r) => { if (vivo) setResultados(r); })
-      .catch((e) => console.error('Error al buscar alimentos:', e));
-    return () => { vivo = false; };
-  }, [busqueda]);
 
   const confirmarPorcion = (cantidad_g: number, porcion: string, carga: CargaCoccion | null) => {
     if (!sheet) return;
@@ -225,50 +186,6 @@ export default function NuevaComida() {
     );
   };
 
-  const guardarNuevoAlimentoManual = async () => {
-    const nombreLimpio = altaNombre.trim();
-    const kcal = parseFloat(altaKcal.replace(',', '.'));
-    if (!nombreLimpio) {
-      Alert.alert('Falta nombre', 'Ingresá el nombre del alimento.');
-      return;
-    }
-    if (!Number.isFinite(kcal) || kcal < 0) {
-      Alert.alert('Kcal inválidas', 'Ingresá las calorías cada 100 gramos.');
-      return;
-    }
-
-    const prot = parseFloat(altaProt.replace(',', '.')) || 0;
-    const carb = parseFloat(altaCarb.replace(',', '.')) || 0;
-    const grasa = parseFloat(altaGrasa.replace(',', '.')) || 0;
-
-    try {
-      const esBebida = esProbableBebida(nombreLimpio);
-      const porciones = esBebida ? obtenerPorcionesBebidaEstandar() : [];
-
-      const nuevo = await guardarAlimento({
-        id: randomUUID(),
-        nombre: nombreLimpio,
-        marca: altaMarca.trim() || null,
-        codigo_barras: params.codigo || null,
-        kcal_por_100g: Math.round(kcal),
-        proteina_g: prot,
-        carbohidratos_g: carb,
-        grasa_g: grasa,
-        fuente: 'manual',
-        verificado: false,
-        porciones,
-        categoria: esBebida ? 'bebidas' : 'otros',
-      });
-
-      setModalAltaManual(false);
-      setSheet({ alimento: nuevo, indice: null });
-      setBusqueda('');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error al guardar alimento';
-      Alert.alert('Error', msg);
-    }
-  };
-
   const buscando = busqueda.trim().length > 0;
 
   // Traduccion del estado local al contrato del sheet compartido.
@@ -298,73 +215,35 @@ export default function NuevaComida() {
       </View>
 
       {/* Buscador + los dos accesos alternativos: foto y codigo de barras. */}
-      <View style={estilos.buscadorFila}>
-        <View style={estilos.flex}>
-          <Input
-            ref={buscador}
-            value={busqueda}
-            onChangeText={setBusqueda}
-            placeholder="Buscar alimento"
-            autoCorrect={false}
-          />
-        </View>
-        <Pressable
-          style={estilos.accionChica}
-          onPress={() => abrirCamara('foto')}
-          accessibilityLabel="Registrar con foto"
-        >
-          <Text style={estilos.accionIcono}>📷</Text>
-        </Pressable>
-        <Pressable
-          style={estilos.accionChica}
-          onPress={() => abrirCamara('codigo')}
-          accessibilityLabel="Escanear código de barras"
-        >
-          <Text style={estilos.accionIcono}>▥</Text>
-        </Pressable>
-      </View>
-
-      {/* Tres estados excluyentes: buscando, vacio, o con items cargados. */}
-      {buscando ? (
-        // Los resultados van agrupados en una card, igual que las comidas del
-        // dashboard: sueltos sobre el lienzo se leian como filas flotando.
-        <View style={estilos.card}>
-          {resultados.map((a, i) => (
+      <BuscadorAlimentos
+        busqueda={busqueda}
+        onCambiarBusqueda={setBusqueda}
+        onElegir={(a) => setSheet({ alimento: a, indice: null })}
+        inputRef={buscador}
+        altaInicial={{ marca: params.marca, codigo: params.codigo }}
+        accesorios={
+          <>
             <Pressable
-              key={a.id}
-              style={[
-                estilos.resultado,
-                // El separador va ADENTRO de la card, y la ultima fila no lleva.
-                i < resultados.length - 1 && estilos.resultadoSeparador,
-              ]}
-              onPress={() => setSheet({ alimento: a, indice: null })}
+              style={estilos.accionChica}
+              onPress={() => abrirCamara('foto')}
+              accessibilityLabel="Registrar con foto"
             >
-              <View style={estilos.flex}>
-                <Text style={estilos.nombre}>{a.nombre}</Text>
-                <Text style={estilos.detalle}>{a.kcal_por_100g} kcal / 100 g</Text>
-              </View>
-              <Text style={estilos.mas}>+</Text>
+              <Text style={estilos.accionIcono}>📷</Text>
             </Pressable>
-          ))}
+            <Pressable
+              style={estilos.accionChica}
+              onPress={() => abrirCamara('codigo')}
+              accessibilityLabel="Escanear código de barras"
+            >
+              <Text style={estilos.accionIcono}>▥</Text>
+            </Pressable>
+          </>
+        }
+      />
 
-          {resultados.length === 0 && (
-            <View style={estilos.vacio}>
-              <Text style={estilos.detalle}>No encontramos nada con ese nombre.</Text>
-              <Pressable
-                style={estilos.botonCargarManual}
-                onPress={() => {
-                  setAltaNombre(busqueda);
-                  setModalAltaManual(true);
-                }}
-              >
-                <Text style={estilos.botonCargarManualTexto}>
-                  + Cargar "{busqueda}" a mano
-                </Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
-      ) : items.length === 0 ? (
+      {/* Tres estados excluyentes: buscando (los resultados los muestra el
+          buscador), vacio, o con items cargados. */}
+      {buscando ? null : items.length === 0 ? (
         <View style={estilos.vacio}>
           <Text style={estilos.detalle}>Buscá lo que comiste para empezar.</Text>
         </View>
@@ -396,47 +275,12 @@ export default function NuevaComida() {
       {/* Pie con totales. Solo cuando hay algo cargado. */}
       {items.length > 0 && !buscando && (
         <View style={estilos.pie}>
-          <View style={estilos.cardTotal}>
-            {/* Calorias destacadas */}
-            <View style={estilos.totalCaloriasFila}>
-              <Text style={estilos.totalCaloriasLabel}>Calorías</Text>
-              <View style={estilos.totalCaloriasValorFila}>
-                <Text style={estilos.totalCaloriasNumero}>
-                  {Math.round(totales.kcal).toLocaleString('es-AR')}
-                </Text>
-                <Text style={estilos.totalCaloriasUnidad}>kcal</Text>
-              </View>
-            </View>
-
-            <View style={estilos.totalSeparador} />
-
-            {/* Los 3 macros con nombres completos y puntos de color */}
-            <View style={estilos.totalMacrosFila}>
-              <View style={estilos.totalMacroItem}>
-                <View style={[estilos.puntoMacro, { backgroundColor: colors.protein }]} />
-                <Text style={estilos.totalMacroTexto}>
-                  Proteína{' '}
-                  <Text style={estilos.totalMacroValor}>{Math.round(totales.prot)} g</Text>
-                </Text>
-              </View>
-
-              <View style={estilos.totalMacroItem}>
-                <View style={[estilos.puntoMacro, { backgroundColor: colors.carbs }]} />
-                <Text style={estilos.totalMacroTexto}>
-                  Carbohidratos{' '}
-                  <Text style={estilos.totalMacroValor}>{Math.round(totales.carb)} g</Text>
-                </Text>
-              </View>
-
-              <View style={estilos.totalMacroItem}>
-                <View style={[estilos.puntoMacro, { backgroundColor: colors.fat }]} />
-                <Text style={estilos.totalMacroTexto}>
-                  Grasas{' '}
-                  <Text style={estilos.totalMacroValor}>{Math.round(totales.grasa)} g</Text>
-                </Text>
-              </View>
-            </View>
-          </View>
+          <TarjetaTotales
+            kcal={totales.kcal}
+            proteina={totales.prot}
+            carbohidratos={totales.carb}
+            grasa={totales.grasa}
+          />
 
           <Boton titulo="Guardar comida" onPress={guardar} cargando={guardando} />
         </View>
@@ -471,104 +315,6 @@ export default function NuevaComida() {
         </View>
       </Modal>
 
-      {/* Modal de alta de alimento a mano */}
-      <Modal
-        visible={modalAltaManual}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setModalAltaManual(false)}
-      >
-        <View style={estilos.fondo}>
-          <Pressable style={estilos.flex} onPress={() => setModalAltaManual(false)} />
-          <View style={estilos.sheetAlta}>
-            <View style={estilos.agarre} />
-            <Text style={estilos.sheetTitulo}>Cargar alimento a mano</Text>
-            <Text style={estilos.sheetSubtitulo}>Completá los datos de la tabla nutricional por 100 g:</Text>
-
-            <View style={estilos.formFila}>
-              <Text style={estilos.labelForm}>Nombre *</Text>
-              <TextInput
-                style={estilos.inputForm}
-                value={altaNombre}
-                onChangeText={setAltaNombre}
-                placeholder="Ej: Yogur Natural"
-                placeholderTextColor={colors.textMuted}
-              />
-            </View>
-
-            <View style={estilos.formFila}>
-              <Text style={estilos.labelForm}>Marca (opcional)</Text>
-              <TextInput
-                style={estilos.inputForm}
-                value={altaMarca}
-                onChangeText={setAltaMarca}
-                placeholder="Ej: La Serenísima"
-                placeholderTextColor={colors.textMuted}
-              />
-            </View>
-
-            <View style={estilos.macrosFilaGrid}>
-              <View style={estilos.macroColInput}>
-                <Text style={estilos.labelForm}>Kcal *</Text>
-                <TextInput
-                  style={estilos.inputForm}
-                  keyboardType="numeric"
-                  value={altaKcal}
-                  onChangeText={setAltaKcal}
-                  placeholder="0"
-                  placeholderTextColor={colors.textMuted}
-                />
-              </View>
-              <View style={estilos.macroColInput}>
-                <Text style={estilos.labelForm}>Prot (g)</Text>
-                <TextInput
-                  style={estilos.inputForm}
-                  keyboardType="numeric"
-                  value={altaProt}
-                  onChangeText={setAltaProt}
-                  placeholder="0"
-                  placeholderTextColor={colors.textMuted}
-                />
-              </View>
-              <View style={estilos.macroColInput}>
-                <Text style={estilos.labelForm}>Carb (g)</Text>
-                <TextInput
-                  style={estilos.inputForm}
-                  keyboardType="numeric"
-                  value={altaCarb}
-                  onChangeText={setAltaCarb}
-                  placeholder="0"
-                  placeholderTextColor={colors.textMuted}
-                />
-              </View>
-              <View style={estilos.macroColInput}>
-                <Text style={estilos.labelForm}>Grasa (g)</Text>
-                <TextInput
-                  style={estilos.inputForm}
-                  keyboardType="numeric"
-                  value={altaGrasa}
-                  onChangeText={setAltaGrasa}
-                  placeholder="0"
-                  placeholderTextColor={colors.textMuted}
-                />
-              </View>
-            </View>
-
-            <View style={estilos.modalBotonesFila}>
-              <Boton
-                titulo="Cancelar"
-                variante="secundario"
-                onPress={() => setModalAltaManual(false)}
-              />
-              <Boton
-                titulo="Guardar y usar"
-                onPress={guardarNuevoAlimentoManual}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
-
       <SheetPorciones
         datos={datosSheet}
         onCerrar={() => setSheet(null)}
@@ -592,7 +338,6 @@ const estilos = StyleSheet.create({
   },
   selectorFlecha: { fontSize: fontSize.small, color: colors.textSecondary },
 
-  buscadorFila: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   accionChica: {
     width: 44,
     height: 44,
@@ -602,25 +347,6 @@ const estilos = StyleSheet.create({
     justifyContent: 'center',
   },
   accionIcono: { fontSize: 20 },
-
-  // La card que agrupa los resultados de la busqueda. Sin padding vertical: lo
-  // pone cada fila, asi los separadores llegan de lado a lado del interior.
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.lg,
-    ...shadow.card,
-  },
-  resultado: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-  },
-  resultadoSeparador: {
-    borderBottomWidth: sizes.hairline,
-    borderBottomColor: colors.border,
-  },
-  mas: { fontSize: fontSize.title, color: colors.action, paddingHorizontal: spacing.sm },
 
   vacio: { paddingVertical: spacing.xl, alignItems: 'center', gap: spacing.xs },
 
@@ -644,71 +370,6 @@ const estilos = StyleSheet.create({
     paddingTop: spacing.sm,
     gap: spacing.md,
   },
-  cardTotal: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    gap: spacing.sm,
-    ...shadow.card,
-  },
-  totalCaloriasFila: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-  },
-  totalCaloriasLabel: {
-    fontSize: fontSize.body,
-    fontWeight: fontWeight.medium,
-    color: colors.textSecondary,
-  },
-  totalCaloriasValorFila: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: spacing.xs,
-  },
-  totalCaloriasNumero: {
-    fontSize: fontSize.title,
-    lineHeight: lineHeight.title,
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-  },
-  totalCaloriasUnidad: {
-    fontSize: fontSize.small,
-    color: colors.textSecondary,
-    fontWeight: fontWeight.regular,
-  },
-  totalSeparador: {
-    height: sizes.hairline,
-    backgroundColor: colors.border,
-  },
-  totalMacrosFila: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    columnGap: spacing.md,
-    rowGap: spacing.xs,
-    alignItems: 'center',
-  },
-  totalMacroItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  puntoMacro: {
-    width: 7,
-    height: 7,
-    borderRadius: radius.pill,
-  },
-  totalMacroTexto: {
-    fontSize: fontSize.small,
-    lineHeight: lineHeight.small,
-    color: colors.textSecondary,
-  },
-  totalMacroValor: {
-    fontWeight: fontWeight.bold,
-    color: colors.textPrimary,
-  },
-
   // Estilos del modal del selector de tipo.
   fondo: { flex: 1, justifyContent: 'flex-end', backgroundColor: colors.overlay },
   sheet: {
@@ -745,67 +406,4 @@ const estilos = StyleSheet.create({
   },
   opcionActiva: { borderWidth: 1.5, borderColor: colors.action },
 
-  botonCargarManual: {
-    marginTop: spacing.sm,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignSelf: 'center',
-  },
-  botonCargarManualTexto: {
-    color: colors.action,
-    fontSize: fontSize.small,
-    fontWeight: fontWeight.bold,
-  },
-
-  sheetAlta: {
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    padding: spacing.lg,
-    paddingBottom: spacing.xxxl,
-    ...shadow.sheet,
-    gap: spacing.sm,
-  },
-  sheetSubtitulo: {
-    fontSize: fontSize.caption,
-    color: colors.textSecondary,
-    marginBottom: spacing.xs,
-  },
-  formFila: {
-    gap: 4,
-  },
-  labelForm: {
-    fontSize: fontSize.caption,
-    fontWeight: fontWeight.bold,
-    color: colors.textSecondary,
-  },
-  inputForm: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    height: sizes.controlSmall,
-    fontSize: fontSize.small,
-    color: colors.textPrimary,
-  },
-  macrosFilaGrid: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  macroColInput: {
-    flex: 1,
-    gap: 4,
-  },
-  modalBotonesFila: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.md,
-    marginTop: spacing.md,
-  },
 });
