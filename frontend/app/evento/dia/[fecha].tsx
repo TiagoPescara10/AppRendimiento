@@ -44,7 +44,7 @@ export default function DiaAgenda() {
       setEventos(await listarEventosPorFecha(perfil.id, fecha));
     } catch (e) {
       console.error('Error al cargar el día:', e);
-      Alert.alert('Error', 'No se pudieron cargar los eventos.');
+      Alert.alert('Error', 'No se pudieron cargar los entrenamientos.');
     } finally {
       setCargando(false);
     }
@@ -69,12 +69,12 @@ export default function DiaAgenda() {
       await cargar();
     } catch (e) {
       console.error('Error al marcar el evento:', e);
-      Alert.alert('Error', 'No se pudo actualizar el evento.');
+      Alert.alert('Error', 'No se pudo actualizar el entrenamiento.');
     }
   };
 
   const borrar = (id: string) => {
-    Alert.alert('Borrar evento', '¿Seguro que querés borrarlo?', [
+    Alert.alert('Borrar entrenamiento', '¿Seguro que querés borrarlo?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Borrar',
@@ -85,7 +85,7 @@ export default function DiaAgenda() {
             await cargar();
           } catch (e) {
             console.error('Error al borrar el evento:', e);
-            Alert.alert('Error', 'No se pudo borrar el evento.');
+            Alert.alert('Error', 'No se pudo borrar el entrenamiento.');
           }
         },
       },

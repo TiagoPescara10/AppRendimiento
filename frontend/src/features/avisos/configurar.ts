@@ -28,7 +28,7 @@ export function configurarHandlerAvisos(): void {
 export async function crearCanalAvisos(): Promise<void> {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync(CANAL_AVISOS, {
-    name: 'Avisos de eventos',
+    name: 'Avisos de entrenamientos',
     description: 'Qué comer antes y después de jugar o entrenar.',
     importance: Notifications.AndroidImportance.DEFAULT,
   });

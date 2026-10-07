@@ -442,7 +442,7 @@ export default function NuevaRutinaGimnasio() {
           autoFocus
         />
         <Text style={estilos.ayuda}>
-          Los días y la hora se asignan después, desde Nuevo evento.
+          Los días y la hora se eligen en Mi semana, en Entrenamientos.
         </Text>
       </View>
 

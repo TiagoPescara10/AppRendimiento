@@ -56,7 +56,7 @@ export function obtenerConsejoLeon(datos: DatosConsejo): ConsejoLeon {
         saludo,
         mensaje: `Tenés ${proximoEvento.titulo} ${tiempoTexto}. Meté carbohidratos de fácil digestión (banana, tostada con dulce o avena) para tener nafta.`,
         accion: {
-          texto: 'Ver evento',
+          texto: 'Ver detalle',
           ruta: `/evento/${proximoEvento.id}`,
         },
       };

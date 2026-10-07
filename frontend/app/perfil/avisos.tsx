@@ -24,12 +24,12 @@ type CampoAviso = 'avisos_activos' | 'avisos_antes' | 'avisos_despues' | 'avisos
 const OPCIONES: { campo: Exclude<CampoAviso, 'avisos_activos'>; titulo: string; bajada: string }[] = [
   {
     campo: 'avisos_antes',
-    titulo: 'Antes del evento',
+    titulo: 'Antes de entrenar o jugar',
     bajada: 'Qué comer unas horas antes, o la noche anterior si jugás temprano.',
   },
   {
     campo: 'avisos_despues',
-    titulo: 'Después del evento',
+    titulo: 'Después de entrenar o jugar',
     bajada: 'Cuánta proteína sumar al terminar.',
   },
   {
@@ -127,13 +127,13 @@ export default function AvisosScreen() {
           <View style={estilos.card}>
             <View style={estilos.fila}>
               <View style={estilos.flex}>
-                <Text style={estilos.filaTitulo}>Avisos de eventos</Text>
+                <Text style={estilos.filaTitulo}>Avisos de entrenamientos</Text>
               </View>
               <Switch
                 value={generalActivo}
                 onValueChange={(v) => cambiar('avisos_activos', v)}
                 trackColor={{ true: colors.action }}
-                accessibilityLabel="Avisos de eventos"
+                accessibilityLabel="Avisos de entrenamientos"
               />
             </View>
 

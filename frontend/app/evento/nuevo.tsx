@@ -341,7 +341,7 @@ export default function NuevoEvento() {
           <Text style={estilos.cerrar}>✕</Text>
         </Pressable>
         <Text style={estilos.headerTitulo}>
-          {esEdicion ? 'Editar rutina' : esRutina ? 'Nueva rutina' : 'Nuevo evento'}
+          {esEdicion ? 'Editar rutina' : esRutina ? 'Nueva rutina' : 'Nuevo entrenamiento'}
         </Text>
       </View>
 
@@ -623,8 +623,8 @@ export default function NuevoEvento() {
           Decirlo antes evita la sorpresa. */}
       {esRutina && (
         <Text style={estilos.aviso}>
-          Se van a crear los eventos de las próximas 8 semanas. Podés borrar o cambiar
-          cualquiera por separado.
+          Se agenda en las próximas 8 semanas. Podés borrar o cambiar cualquier día por
+          separado.
         </Text>
       )}
 

@@ -90,7 +90,7 @@ export default function MisRutinas() {
   const confirmarBorrarEntrenamiento = (rutina: RutinaAgrupada) => {
     Alert.alert(
       'Dar de baja rutina',
-      'Se van a borrar los eventos futuros de esta rutina. Lo que ya hiciste queda en tu historial.',
+      'Se van a borrar los entrenamientos que tenías agendados de acá en adelante. Lo que ya hiciste queda en tu historial.',
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -115,7 +115,7 @@ export default function MisRutinas() {
   const confirmarBorrarGimnasio = (rutina: RutinaGimnasioAgrupada) => {
     Alert.alert(
       'Dar de baja rutina',
-      'Se van a borrar los eventos futuros de esta rutina. Lo que ya hiciste queda en tu historial.',
+      'Se van a borrar los entrenamientos que tenías agendados de acá en adelante. Lo que ya hiciste queda en tu historial.',
       [
         { text: 'Cancelar', style: 'cancel' },
         {

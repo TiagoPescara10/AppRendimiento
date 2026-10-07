@@ -361,9 +361,10 @@ export default function Agenda() {
                 })
               }
               hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Agregar a mi semana"
             >
               <Ionicons name="add" size={17} color={colors.textOnAction} />
-              <Text style={estilos.botonNuevaSesionTexto}>Sesión</Text>
             </Pressable>
           </View>
         </View>
@@ -626,7 +627,7 @@ export default function Agenda() {
                 No hay sesiones {categoriaActiva !== 'todas' ? 'en esta categoría' : 'programadas'}
               </Text>
               <Text style={estilos.cardVaciaSubtitulo}>
-                Podés programar un nuevo evento deportivo o asignar una rutina de gimnasio para este día.
+                Podés agregar un entrenamiento, un partido o un día de gimnasio.
               </Text>
               <Pressable
                 style={estilos.botonProgramarSesion}
@@ -638,7 +639,7 @@ export default function Agenda() {
                 }
               >
                 <Ionicons name="add" size={16} color={colors.textOnAction} />
-                <Text style={estilos.botonProgramarSesionTexto}>Programar sesión</Text>
+                <Text style={estilos.botonProgramarSesionTexto}>Agregar a mi semana</Text>
               </Pressable>
             </View>
           ) : (
@@ -966,16 +967,11 @@ const estilos = StyleSheet.create({
   botonNuevaSesion: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
+    justifyContent: 'center',
     backgroundColor: colors.action,
-    paddingHorizontal: spacing.sm + 4,
-    paddingVertical: 7,
+    // Solo el icono: un circulo del alto que tenia la pastilla con texto.
+    padding: 7,
     borderRadius: radius.pill,
-  },
-  botonNuevaSesionTexto: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-    color: colors.textOnAction,
   },
 
   // 2. Banner Constancia

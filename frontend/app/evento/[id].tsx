@@ -78,7 +78,7 @@ export default function DetalleEvento() {
       setDeporte(perfil?.deporte_principal ?? null);
     } catch (e) {
       console.error('Error al cargar el evento:', e);
-      Alert.alert('Error', 'No se pudo cargar el evento.');
+      Alert.alert('Error', 'No se pudo cargar el entrenamiento.');
     } finally {
       setCargando(false);
     }
@@ -102,13 +102,13 @@ export default function DetalleEvento() {
       await cargar();
     } catch (e) {
       console.error('Error al marcar el evento:', e);
-      Alert.alert('Error', 'No se pudo actualizar el evento.');
+      Alert.alert('Error', 'No se pudo actualizar el entrenamiento.');
     }
   };
 
   const borrar = () => {
     if (!evento) return;
-    Alert.alert('Borrar evento', '¿Seguro que querés borrarlo?', [
+    Alert.alert('Borrar entrenamiento', '¿Seguro que querés borrarlo?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Borrar',
@@ -125,7 +125,7 @@ export default function DetalleEvento() {
             router.back();
           } catch (e) {
             console.error('Error al borrar el evento:', e);
-            Alert.alert('Error', 'No se pudo borrar el evento.');
+            Alert.alert('Error', 'No se pudo borrar el entrenamiento.');
           }
         },
       },
@@ -151,10 +151,10 @@ export default function DetalleEvento() {
           <Pressable onPress={() => router.back()} hitSlop={12}>
             <Text style={estilos.flecha}>‹</Text>
           </Pressable>
-          <Text style={estilos.titulo}>Evento</Text>
+          <Text style={estilos.titulo}>Entrenamiento</Text>
         </View>
         <View style={estilos.vacio}>
-          <Text style={estilos.detalle}>Este evento ya no existe.</Text>
+          <Text style={estilos.detalle}>Este entrenamiento ya no existe.</Text>
         </View>
       </Pantalla>
     );
@@ -287,7 +287,7 @@ export default function DetalleEvento() {
       />
 
       <Pressable style={estilos.borrar} onPress={borrar}>
-        <Text style={estilos.borrarTexto}>Borrar evento</Text>
+        <Text style={estilos.borrarTexto}>Borrar entrenamiento</Text>
       </Pressable>
     </Pantalla>
   );
@@ -398,7 +398,7 @@ function PlanRutina({
   if (!rutina) {
     return (
       <View style={estilos.card}>
-        <Text style={estilos.detalle}>La rutina asignada a este evento ya no existe.</Text>
+        <Text style={estilos.detalle}>La rutina asignada a este entrenamiento ya no existe.</Text>
       </View>
     );
   }
