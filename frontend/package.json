@@ -71,6 +71,7 @@
     "test:fuerza": "node scripts/probar-fuerza.mjs",
     "test:validacion": "node scripts/probar-validacion.mjs",
     "test:seed": "node scripts/probar-seed-desarrollo.mjs",
+    "test:rondas": "node scripts/probar-rondas.mjs",
     "seed:dev": "node scripts/seed-desarrollo.mjs",
     "sonidos": "node scripts/generar-sonidos.mjs"
   },

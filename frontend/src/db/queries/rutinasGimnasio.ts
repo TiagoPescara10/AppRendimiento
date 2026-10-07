@@ -30,8 +30,22 @@ export interface EjercicioEnRutinaGimnasio extends EjercicioRow {
   /** Orden dentro del bloque. */
   orden: number;
   bloque: BloqueRutina;
+  /**
+   * rutina_gimnasio_ejercicio.grupo. Se lee con otro nombre porque `grupo` ya
+   * es el grupo muscular del ejercicio. null = suelto; mismo numero = misma
+   * superserie o circuito.
+   */
+  grupo_rutina: number | null;
   relacion_id: string;
 }
+
+/**
+ * Como se mandan los ejercicios de un bloque a guardar: un string es un
+ * ejercicio suelto y un array es una superserie o circuito, en orden. Asi un
+ * grupo es consecutivo y queda dentro de un bloque por construccion. Un
+ * string[] plano (todo suelto) sigue siendo valido.
+ */
+export type UnidadIds = string | string[];
 
 export interface RutinaGimnasioConDetalle extends RutinaGimnasioRow {
   ejercicios: EjercicioEnRutinaGimnasio[];
@@ -83,33 +97,43 @@ export interface NuevaRutinaGimnasio {
   nombre: string;
   activa?: boolean;
   /** Bloque principal, en orden. */
-  ejercicio_ids: string[];
+  ejercicio_ids: UnidadIds[];
   /** Bloque de calentamiento, en orden. Opcional: si falta, no hay. */
-  calentamiento_ids?: string[];
+  calentamiento_ids?: UnidadIds[];
 }
 
 /**
  * Inserta los ejercicios de los dos bloques. El orden arranca en 0 en cada
  * bloque: el calentamiento va primero por el bloque, no por el orden.
+ *
+ * Los grupos se numeran 1, 2, 3... por rutina, no por bloque, asi un numero
+ * nunca queda en los dos bloques. Un grupo de un solo ejercicio se guarda
+ * suelto: una superserie de uno no existe.
  */
 async function insertarEjerciciosRutina(
   rutinaId: string,
-  principal: string[],
-  calentamiento: string[],
+  principal: UnidadIds[],
+  calentamiento: UnidadIds[],
   t: string,
 ): Promise<void> {
-  const bloques: [BloqueRutina, string[]][] = [
+  const bloques: [BloqueRutina, UnidadIds[]][] = [
     ['calentamiento', calentamiento],
     ['principal', principal],
   ];
-  for (const [bloque, ids] of bloques) {
-    for (let i = 0; i < ids.length; i++) {
-      await getDb().runAsync(
-        `INSERT INTO rutina_gimnasio_ejercicio
-           (id, rutina_gimnasio_id, ejercicio_id, orden, bloque, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [randomUUID(), rutinaId, ids[i], i, bloque, t, t],
-      );
+  let ultimoGrupo = 0;
+  for (const [bloque, unidades] of bloques) {
+    let orden = 0;
+    for (const unidad of unidades) {
+      const ids = typeof unidad === 'string' ? [unidad] : unidad;
+      const grupo = ids.length > 1 ? ++ultimoGrupo : null;
+      for (const ejercicioId of ids) {
+        await getDb().runAsync(
+          `INSERT INTO rutina_gimnasio_ejercicio
+             (id, rutina_gimnasio_id, ejercicio_id, orden, bloque, grupo, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [randomUUID(), rutinaId, ejercicioId, orden++, bloque, grupo, t, t],
+        );
+      }
     }
   }
 }
@@ -154,7 +178,7 @@ export async function obtenerRutinaGimnasio(
   if (!fila) return null;
 
   const ejercicios = await db.getAllAsync<EjercicioEnRutinaGimnasio>(
-    `SELECT e.*, rge.orden, rge.bloque, rge.id AS relacion_id
+    `SELECT e.*, rge.orden, rge.bloque, rge.grupo AS grupo_rutina, rge.id AS relacion_id
      FROM rutina_gimnasio_ejercicio rge
      JOIN ejercicio e ON e.id = rge.ejercicio_id
      WHERE rge.rutina_gimnasio_id = ?
@@ -253,9 +277,9 @@ export async function eliminarRutinaGimnasio(id: string): Promise<void> {
 export interface ActualizarRutinaGimnasio {
   id: string;
   nombre: string;
-  ejercicio_ids: string[];
+  ejercicio_ids: UnidadIds[];
   /** Si falta, la rutina queda sin calentamiento. */
-  calentamiento_ids?: string[];
+  calentamiento_ids?: UnidadIds[];
 }
 
 export async function actualizarRutinaGimnasio(

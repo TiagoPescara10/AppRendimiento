@@ -3261,6 +3261,91 @@ await prueba('el calentamiento y las series por tiempo no suman volumen ni cuent
   await schema.cerrarDb();
 });
 
+// --- superseries y circuitos (migracion 022) -------------------------------
+
+await prueba('la 022 sobre una base v21 con rutinas: todo queda suelto y el trigger cuida los bloques', async () => {
+  const db = await sqlite.openDatabaseAsync(join(tmp, 'v22-test.db'));
+  await db.execAsync('PRAGMA foreign_keys = ON;');
+  for (let v = 1; v <= 21; v++) {
+    await db.execAsync(migrations.migraciones.find((mig) => mig.version === v).sql);
+  }
+  await db.execAsync('PRAGMA user_version = 21');
+
+  const t = '2026-09-01T00:00:00.000Z';
+  await db.runAsync("INSERT INTO perfil (id, fecha_alta, created_at, updated_at) VALUES ('u-22', '2026-09-01', ?, ?)", [t, t]);
+  await db.runAsync("INSERT INTO ejercicio (id, nombre, grupo, created_at, updated_at) VALUES ('e1', 'Uno', 'pecho', ?, ?), ('e2', 'Dos', 'espalda', ?, ?)", [t, t, t, t]);
+  await db.runAsync("INSERT INTO rutina_gimnasio (id, usuario_id, nombre, created_at, updated_at) VALUES ('rg-22', 'u-22', 'Torso', ?, ?)", [t, t]);
+  await db.runAsync(
+    `INSERT INTO rutina_gimnasio_ejercicio (id, rutina_gimnasio_id, ejercicio_id, orden, bloque, created_at, updated_at)
+     VALUES ('r1', 'rg-22', 'e1', 0, 'calentamiento', ?, ?), ('r2', 'rg-22', 'e1', 0, 'principal', ?, ?),
+            ('r3', 'rg-22', 'e2', 1, 'principal', ?, ?)`,
+    [t, t, t, t, t, t],
+  );
+
+  const v = await migrations.migrar(db);
+  igual(v, migrations.VERSION_ESQUEMA, 'queda en la ultima');
+  const filas = await db.getAllAsync('SELECT id, bloque, grupo FROM rutina_gimnasio_ejercicio ORDER BY id');
+  igual(filas.length, 3, 'no se pierde nada');
+  igual(filas.every((f) => f.grupo === null), true, 'todo suelto');
+
+  // Mismo grupo en el mismo bloque: bien
+  await db.runAsync("UPDATE rutina_gimnasio_ejercicio SET grupo = 1 WHERE id IN ('r2', 'r3')");
+  // Sumar el del calentamiento a ese grupo: el trigger de UPDATE lo frena
+  await lanza(
+    () => db.runAsync("UPDATE rutina_gimnasio_ejercicio SET grupo = 1 WHERE id = 'r1'"),
+    /mezclar calentamiento y principal/, 'update cruzando bloques');
+  // Y el de INSERT tambien
+  await lanza(
+    () => db.runAsync(
+      `INSERT INTO rutina_gimnasio_ejercicio (id, rutina_gimnasio_id, ejercicio_id, orden, bloque, grupo, created_at, updated_at)
+       VALUES ('r4', 'rg-22', 'e2', 1, 'calentamiento', 1, ?, ?)`, [t, t]),
+    /mezclar calentamiento y principal/, 'insert cruzando bloques');
+  // Mover de bloque un ejercicio que esta en un grupo tambien cruza
+  await lanza(
+    () => db.runAsync("UPDATE rutina_gimnasio_ejercicio SET bloque = 'calentamiento' WHERE id = 'r3'"),
+    /mezclar calentamiento y principal/, 'cambiar de bloque dentro de un grupo');
+  await lanza(
+    () => db.runAsync("UPDATE rutina_gimnasio_ejercicio SET grupo = 0 WHERE id = 'r3'"),
+    /CHECK/i, 'grupo 0');
+  await db.closeAsync();
+});
+
+await prueba('rutina con superseries: guarda grupos numerados por rutina, sin grupos de uno', async () => {
+  const db = await schema.initDb(join(tmp, 'v22-grupos.db'));
+  await qPerfil.crearPerfil({ id: 'u-g', fecha_alta: '2026-09-01T10:00:00-03:00' });
+  const id = async (nombre) => (await db.getFirstAsync('SELECT id FROM ejercicio WHERE nombre = ?', [nombre])).id;
+  const [banca, remo, militar, curl, movilidad, saltos] = await Promise.all([
+    id('Press de banca plano con barra'), id('Remo con barra'), id('Press militar con barra'),
+    id('Curl de biceps con barra de pie'), id('Movilidad articular general'), id('Saltos de tijera'),
+  ]);
+
+  const rg = await qRutinasGimnasio.crearRutinaGimnasio({
+    id: 'rg-g', usuario_id: 'u-g', nombre: 'Torso',
+    calentamiento_ids: [[movilidad, saltos]],
+    ejercicio_ids: [[banca, remo], militar, [curl]],
+  });
+  const ver = rg.ejercicios.map((e) => `${e.bloque[0]}${e.orden}:${e.grupo_rutina ?? '-'}`).join(' ');
+  igual(ver, 'c0:1 c1:1 p0:2 p1:2 p2:- p3:-', 'grupos y orden');
+  igual(rg.ejercicios[0].grupo, 'cardio', 'el grupo muscular no se pisa con el de la rutina');
+
+  // Editar con un circuito de tres y sin calentamiento
+  const ed = await qRutinasGimnasio.actualizarRutinaGimnasio({
+    id: 'rg-g', nombre: 'Torso', ejercicio_ids: [[banca, remo, militar], curl],
+  });
+  igual(ed.ejercicios.map((e) => e.grupo_rutina ?? '-').join(','), '1,1,1,-', 'circuito');
+
+  // Un string[] plano sigue valiendo: todo suelto
+  const plano = await qRutinasGimnasio.actualizarRutinaGimnasio({
+    id: 'rg-g', nombre: 'Torso', ejercicio_ids: [banca, remo],
+  });
+  igual(plano.ejercicios.every((e) => e.grupo_rutina === null), true, 'plano suelto');
+
+  const predef = (await qRutinasGimnasio.listarRutinasPredefinidas())[0];
+  const copia = await qRutinasGimnasio.copiarRutinaPredefinida(predef.id, 'u-g');
+  igual(copia.ejercicios.every((e) => e.grupo_rutina === null), true, 'la copia queda suelta');
+  await schema.cerrarDb();
+});
+
 // --- salida ----------------------------------------------------------------
 
 rmSync(tmp, { recursive: true, force: true });

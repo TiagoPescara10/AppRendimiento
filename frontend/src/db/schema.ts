@@ -258,6 +258,8 @@ export interface RutinaGimnasioEjercicioRow {
   /** Orden dentro del bloque. */
   orden: number;
   bloque: BloqueRutina;
+  /** null = suelto. Mismo numero = misma superserie o circuito (migracion 022). */
+  grupo: number | null;
   created_at: string;
   updated_at: string;
 }
