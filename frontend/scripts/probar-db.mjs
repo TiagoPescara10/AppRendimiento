@@ -161,6 +161,8 @@ const T = req('./features/entrenamiento/temporizador.js');
 const fPorciones = req('./features/comidas/porciones.js');
 const semillaCoccion = req('./db/seeds/coccion.js');
 const coccion = req('./lib/coccion.js');
+const qRecetas = req('./db/queries/recetas.js');
+const libRecetas = req('./lib/recetas.js');
 
 // El ciclo de imports se manifiesta aca: si schema -> migrations -> 00N -> schema,
 // el literal queda congelado en undefined al construirse el objeto.
@@ -183,14 +185,15 @@ await prueba('initDb() abre y migra una base en memoria', async () => {
   igual(v.user_version, migrations.VERSION_ESQUEMA, 'user_version');
 });
 
-await prueba('las 18 tablas existen (rutina_gimnasio_dia eliminada en v14)', async () => {
+await prueba('las 20 tablas existen (rutina_gimnasio_dia eliminada en v14, receta en v23)', async () => {
   const filas = await schema
     .getDb()
     .getAllAsync("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
   const nombres = filas.map((f) => f.name);
   const esperadas = [
     'alimento', 'comida', 'ejercicio', 'evento', 'item_comida', 'meta',
-    'perfil', 'registro_agua', 'registro_energia', 'registro_peso', 'registro_sueno', 'rutina',
+    'perfil', 'receta', 'receta_item',
+    'registro_agua', 'registro_energia', 'registro_peso', 'registro_sueno', 'rutina',
     'rutina_gimnasio', 'rutina_gimnasio_ejercicio',
     'rutina_predefinida', 'rutina_predefinida_ejercicio',
     'serie', 'sesion_entrenamiento',
@@ -3343,6 +3346,200 @@ await prueba('rutina con superseries: guarda grupos numerados por rutina, sin gr
   const predef = (await qRutinasGimnasio.listarRutinasPredefinidas())[0];
   const copia = await qRutinasGimnasio.copiarRutinaPredefinida(predef.id, 'u-g');
   igual(copia.ejercicios.every((e) => e.grupo_rutina === null), true, 'la copia queda suelta');
+  await schema.cerrarDb();
+});
+
+// --- recetas, repetir e historial (migracion 023) -------------------------
+
+await prueba('la 023 sobre una base v22 con comidas: no se pierde nada y lo nuevo queda en null', async () => {
+  const db = await sqlite.openDatabaseAsync(join(tmp, 'v23-test.db'));
+  await db.execAsync('PRAGMA foreign_keys = ON;');
+  for (let v = 1; v <= 22; v++) {
+    await db.execAsync(migrations.migraciones.find((mig) => mig.version === v).sql);
+  }
+  await db.execAsync('PRAGMA user_version = 22');
+
+  const t = '2026-09-01T00:00:00.000Z';
+  await db.runAsync("INSERT INTO perfil (id, fecha_alta, created_at, updated_at) VALUES ('u-23', '2026-09-01', ?, ?)", [t, t]);
+  await db.runAsync(
+    `INSERT INTO alimento (id, nombre, kcal_por_100g, fuente, created_at, updated_at)
+     VALUES ('al-23', 'Arroz', 130, 'manual', ?, ?)`, [t, t]);
+  await db.runAsync(
+    `INSERT INTO comida (id, usuario_id, fecha_hora, tipo, created_at, updated_at)
+     VALUES ('co-23', 'u-23', '2026-09-01T13:00:00-03:00', 'almuerzo', ?, ?)`, [t, t]);
+  await db.runAsync(
+    `INSERT INTO item_comida (id, comida_id, alimento_id, cantidad_g, estado_carga, cantidad_ingresada_g, created_at, updated_at)
+     VALUES ('it-23', 'co-23', 'al-23', 200, 'crudo', 80, ?, ?)`, [t, t]);
+
+  const v = await migrations.migrar(db);
+  igual(v, migrations.VERSION_ESQUEMA, 'queda en la ultima');
+  const it = await db.getFirstAsync("SELECT * FROM item_comida WHERE id = 'it-23'");
+  igual(it.cantidad_g, 200, 'cantidad');
+  igual(it.cantidad_ingresada_g, 80, 'cantidad ingresada');
+  igual([it.receta_id, it.receta_grupo, it.receta_nombre, it.receta_porciones].join(','), ',,,', 'receta en null');
+  igual((await db.getAllAsync('PRAGMA foreign_key_check')).length, 0, 'foreign_key_check');
+
+  await lanza(() => db.runAsync(
+    "INSERT INTO receta (id, usuario_id, nombre, porciones, created_at, updated_at) VALUES ('r0', 'u-23', 'X', 0, ?, ?)", [t, t]),
+    /CHECK/i, 'rinde 0');
+  await lanza(() => db.runAsync(
+    "INSERT INTO receta (id, usuario_id, nombre, porciones, created_at, updated_at) VALUES ('r1', 'u-23', '   ', 1, ?, ?)", [t, t]),
+    /CHECK/i, 'nombre vacio');
+  await lanza(() => db.runAsync("UPDATE item_comida SET receta_porciones = 0 WHERE id = 'it-23'"),
+    /CHECK/i, 'cero porciones comidas');
+  await db.closeAsync();
+});
+
+/** Base nueva con un perfil y dos alimentos de valores redondos. */
+async function baseRecetas(archivo) {
+  const db = await schema.initDb(join(tmp, archivo));
+  await qPerfil.crearPerfil({ id: 'u-r', fecha_alta: '2026-09-01T10:00:00-03:00' });
+  const masa = await qAlimentos.guardarAlimento({
+    id: 'al-masa', nombre: 'Masa de tarta', kcal_por_100g: 300, proteina_g: 8, carbohidratos_g: 50, grasa_g: 10, fuente: 'manual',
+  });
+  const relleno = await qAlimentos.guardarAlimento({
+    id: 'al-relleno', nombre: 'Jamon y queso', kcal_por_100g: 200, proteina_g: 20, carbohidratos_g: 2, grasa_g: 12, fuente: 'manual',
+  });
+  return { db, masa, relleno };
+}
+
+const tarta = (id = 'rc-tarta') => ({
+  id, usuario_id: 'u-r', nombre: 'Tarta', porciones: 4,
+  ingredientes: [
+    { alimento_id: 'al-masa', cantidad_g: 400, estado_carga: null, cantidad_ingresada_g: null },
+    { alimento_id: 'al-relleno', cantidad_g: 400, estado_carga: 'crudo', cantidad_ingresada_g: 500 },
+  ],
+});
+
+await prueba('registrar una receta escala los ingredientes: rinde 4, se comen 1,5', async () => {
+  await baseRecetas('v23-escalado.db');
+  const r = await qRecetas.crearReceta(tarta());
+  igual(r.items.length, 2, 'dos ingredientes');
+  igual(r.usada_en, null, 'nunca usada');
+
+  const resumen = (await qRecetas.listarRecetas('u-r'))[0];
+  igual(resumen.ingredientes, 2, 'cantidad de ingredientes');
+  igual(Math.round(resumen.kcal_porcion), (400 * 3 + 400 * 2) / 4, 'kcal por porcion en SQL');
+
+  const comida = await qRecetas.registrarReceta({
+    recetaId: 'rc-tarta', usuarioId: 'u-r', tipo: 'cena',
+    fechaHora: '2026-10-06T21:00:00-03:00', porciones: 1.5,
+  });
+  const items = await qComidas.listarItems(comida.id);
+  igual(items.map((i) => i.cantidad_g).join(','), '150,150', '400 x 0,375');
+  igual(items[1].cantidad_ingresada_g, 187.5, 'lo pesado en crudo tambien escala');
+  igual(items[1].estado_carga, 'crudo', 'estado de carga');
+  igual(items[0].receta_id, 'rc-tarta', 'referencia');
+  igual(items[0].receta_grupo, items[1].receta_grupo, 'un solo grupo');
+  igual(items[0].receta_nombre, 'Tarta', 'nombre guardado');
+  igual(items[0].receta_porciones, 1.5, 'porciones comidas');
+  igual((await qRecetas.obtenerReceta('rc-tarta')).usada_en !== null, true, 'queda usada');
+  igual(libRecetas.factorPorciones(1.5, 4), 0.375, 'factor');
+  await schema.cerrarDb();
+});
+
+await prueba('Repetir copia tipo e items (cantidad, estado de carga, receta) hoy, sin foto', async () => {
+  await baseRecetas('v23-repetir.db');
+  await qRecetas.crearReceta(tarta());
+  const original = await qRecetas.registrarReceta({
+    recetaId: 'rc-tarta', usuarioId: 'u-r', tipo: 'almuerzo',
+    fechaHora: '2026-10-05T13:00:00-03:00', porciones: 1, comidaId: 'co-orig',
+  });
+  await qComidas.actualizarComida(original.id, { foto_url: 'file:///foto.jpg' });
+  await qComidas.agregarItem({ id: 'it-suelto', comida_id: 'co-orig', alimento_id: 'al-masa', cantidad_g: 50 });
+
+  const copia = await qComidas.repetirComida('co-orig', '2026-10-07T09:15:00-03:00', 'co-copia');
+  igual(copia.tipo, 'almuerzo', 'mismo tipo');
+  igual(copia.fecha, '2026-10-07', 'hoy');
+  igual(copia.fecha_hora, '2026-10-07T09:15:00-03:00', 'a la hora pasada');
+  igual(copia.foto_url, null, 'la foto no se copia');
+
+  const antes = await qComidas.listarItems('co-orig');
+  const despues = await qComidas.listarItems('co-copia');
+  const clave = (i) => [i.alimento_id, i.cantidad_g, i.estado_carga, i.cantidad_ingresada_g, i.receta_nombre, i.receta_porciones].join('|');
+  igual(despues.map(clave).join(' ; '), antes.map(clave).join(' ; '), 'mismos items');
+  igual(despues.some((i) => antes.some((a) => a.id === i.id)), false, 'ids nuevos');
+  const grupoAntes = antes.find((i) => i.receta_grupo).receta_grupo;
+  const grupoDespues = despues.find((i) => i.receta_grupo).receta_grupo;
+  igual(grupoDespues !== grupoAntes, true, 'grupo de receta nuevo');
+  igual(new Set(despues.filter((i) => i.receta_grupo).map((i) => i.receta_grupo)).size, 1, 'un grupo para los dos ingredientes');
+  await schema.cerrarDb();
+});
+
+await prueba('borrar una receta no rompe las comidas: siguen mostrando "Tarta · 1 porción" agrupado', async () => {
+  const { db } = await baseRecetas('v23-borrar.db');
+  await qRecetas.crearReceta(tarta());
+  const comida = await qRecetas.registrarReceta({
+    recetaId: 'rc-tarta', usuarioId: 'u-r', tipo: 'cena',
+    fechaHora: '2026-10-06T21:00:00-03:00', porciones: 1,
+  });
+  await qComidas.agregarItem({ id: 'it-pan', comida_id: comida.id, alimento_id: 'al-masa', cantidad_g: 30 });
+  const totalAntes = (await qComidas.totalesPorDia('u-r', '2026-10-06', '2026-10-06'))[0].kcal;
+
+  await qRecetas.borrarReceta('rc-tarta');
+  igual(await qRecetas.obtenerReceta('rc-tarta'), null, 'la receta no esta');
+  igual((await db.getFirstAsync("SELECT count(*) AS n FROM receta_item WHERE receta_id = 'rc-tarta'")).n, 0, 'sin ingredientes');
+
+  const items = await qComidas.listarItemsConAlimento(comida.id);
+  igual(items.length, 3, 'los items siguen');
+  igual(items.every((i) => i.receta_id === null), true, 'referencia en null');
+  igual((await qComidas.totalesPorDia('u-r', '2026-10-06', '2026-10-06'))[0].kcal, totalAntes, 'mismo total');
+
+  const bloques = libRecetas.agruparPorReceta(items);
+  igual(bloques.map((b) => b.tipo).join(','), 'receta,suelto', 'agrupado y el suelto aparte');
+  const b = bloques[0];
+  igual(`${b.nombre} · ${libRecetas.textoPorciones(b.porciones)}`, 'Tarta · 1 porción', 'cabecera');
+  igual(b.items.length, 2, 'los dos ingredientes adentro');
+
+  // Renombrar no cambia lo que ya se comio
+  await qRecetas.crearReceta({ ...tarta('rc-2'), nombre: 'Tarta vieja' });
+  const otra = await qRecetas.registrarReceta({
+    recetaId: 'rc-2', usuarioId: 'u-r', tipo: 'cena', fechaHora: '2026-10-06T21:30:00-03:00', porciones: 2,
+  });
+  await qRecetas.actualizarReceta({ ...tarta('rc-2'), nombre: 'Tarta nueva' });
+  const g = libRecetas.agruparPorReceta(await qComidas.listarItemsConAlimento(otra.id))[0];
+  igual(`${g.nombre} · ${libRecetas.textoPorciones(g.porciones)}`, 'Tarta vieja · 2 porciones', 'nombre de ese momento');
+  await schema.cerrarDb();
+});
+
+await prueba('guardar una comida como receta: rinde 1 y copia cantidades y estado de carga', async () => {
+  await baseRecetas('v23-guardar.db');
+  await qComidas.crearComidaConItems(
+    { id: 'co-g', usuario_id: 'u-r', fecha_hora: '2026-10-06T13:00:00-03:00', tipo: 'almuerzo' },
+    [
+      { id: 'i1', alimento_id: 'al-masa', cantidad_g: 120 },
+      { id: 'i2', alimento_id: 'al-relleno', cantidad_g: 90, carga: { estado_carga: 'crudo', cantidad_ingresada_g: 110 } },
+    ],
+  );
+  const r = await qRecetas.guardarComidaComoReceta({ comidaId: 'co-g', usuarioId: 'u-r', nombre: ' Mi almuerzo ' });
+  igual(r.nombre, 'Mi almuerzo', 'nombre limpio');
+  igual(r.porciones, 1, 'rinde 1');
+  igual(r.items.map((i) => `${i.cantidad_g}/${i.estado_carga}/${i.cantidad_ingresada_g}`).join(' '),
+    '120/null/null 90/crudo/110', 'items copiados');
+  const busq = await qRecetas.buscarRecetas('u-r', 'almu');
+  igual(busq.map((x) => x.id).join(','), r.id, 'el buscador la encuentra');
+  await schema.cerrarDb();
+});
+
+await prueba('historial: totales por dia en SQL, por dia local aunque cruce la medianoche UTC', async () => {
+  await baseRecetas('v23-historial.db');
+  const comida = (id, fh, gramos, alimento = 'al-masa') => qComidas.crearComidaConItems(
+    { id, usuario_id: 'u-r', fecha_hora: fh, tipo: 'cena' },
+    [{ id: `${id}-i`, alimento_id: alimento, cantidad_g: gramos }],
+  );
+  // 22:30 -03:00 es 01:30 UTC del 6: tiene que caer el 5
+  await comida('h1', '2026-10-05T22:30:00-03:00', 100);
+  await comida('h2', '2026-10-05T08:00:00-03:00', 50, 'al-relleno');
+  await comida('h3', '2026-10-06T13:00:00-03:00', 200);
+  // Fuera del rango
+  await comida('h4', '2026-10-12T13:00:00-03:00', 100);
+
+  const dias = await qComidas.totalesPorDia('u-r', '2026-10-05', '2026-10-11');
+  igual(dias.map((d) => `${d.fecha}:${Math.round(d.kcal)}`).join(' '), '2026-10-06:600 2026-10-05:400', 'por dia, del mas nuevo al mas viejo');
+
+  const comidas = await qComidas.comidasPorRango('u-r', '2026-10-05', '2026-10-11');
+  igual(comidas.map((c) => `${c.id}:${c.fecha}:${Math.round(c.kcal)}`).join(' '),
+    'h3:2026-10-06:600 h1:2026-10-05:300 h2:2026-10-05:100', 'comidas con su total');
   await schema.cerrarDb();
 });
 

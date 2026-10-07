@@ -157,6 +157,41 @@ export interface ItemComidaRow {
   estado_carga: EstadoCoccion | null;
   /** Lo que peso de verdad ("300 g crudo"). Solo para mostrar. */
   cantidad_ingresada_g: number | null;
+  /** Receta de la que salio. null si no salio de una, o si se borro despues. */
+  receta_id: string | null;
+  /** Mismo valor en los items de una vez que se agrego la receta. */
+  receta_grupo: string | null;
+  /** El nombre de la receta en ese momento: sobrevive al borrado y al renombre. */
+  receta_nombre: string | null;
+  /** Cuantas porciones de la receta se comieron. */
+  receta_porciones: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Comida armada que se reusa (migracion 023). */
+export interface RecetaRow {
+  id: string;
+  usuario_id: string;
+  nombre: string;
+  /** En cuantas porciones rinde. */
+  porciones: number;
+  /** Ultima vez que se registro en una comida. null = nunca. */
+  usada_en: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Ingrediente de una receta, para la receta entera. Mismo modelo que item_comida. */
+export interface RecetaItemRow {
+  id: string;
+  receta_id: string;
+  alimento_id: string;
+  orden: number;
+  /** En el estado_base del alimento. */
+  cantidad_g: number;
+  estado_carga: EstadoCoccion | null;
+  cantidad_ingresada_g: number | null;
   created_at: string;
   updated_at: string;
 }

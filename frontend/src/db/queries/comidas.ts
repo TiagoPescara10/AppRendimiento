@@ -11,6 +11,7 @@
 
 import { getDb } from '../schema';
 import type { ComidaRow, EstadoCoccion, ItemComidaRow, TipoComida } from '../schema';
+import { randomUUID } from '../sync/uuid';
 
 const ahora = (): string => new Date().toISOString();
 
@@ -137,6 +138,20 @@ export interface NuevoItemComida {
   editado_por_usuario?: boolean;
   /** Solo si el usuario peso en un estado distinto del base del alimento. */
   carga?: CargaCoccion | null;
+  /** Solo si el item salio de una receta. */
+  receta?: RefReceta | null;
+}
+
+/**
+ * De que receta salio un item. Los items de una misma vez que se agrego la
+ * receta comparten `grupo`. El nombre se guarda tal como estaba: el detalle lo
+ * muestra aunque la receta se borre o se renombre.
+ */
+export interface RefReceta {
+  receta_id: string | null;
+  grupo: string;
+  nombre: string;
+  porciones: number;
 }
 
 /** Lo que el usuario peso de verdad, cuando no fue en el estado base. Solo para mostrar. */
@@ -163,8 +178,9 @@ export async function agregarItem(datos: NuevoItemComida): Promise<ItemComidaRow
   await getDb().runAsync(
     `INSERT INTO item_comida
        (id, comida_id, alimento_id, cantidad_g, editado_por_usuario,
-        estado_carga, cantidad_ingresada_g, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        estado_carga, cantidad_ingresada_g,
+        receta_id, receta_grupo, receta_nombre, receta_porciones, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       datos.id,
       datos.comida_id,
@@ -173,6 +189,10 @@ export async function agregarItem(datos: NuevoItemComida): Promise<ItemComidaRow
       datos.editado_por_usuario ? 1 : 0,
       datos.carga?.estado_carga ?? null,
       datos.carga?.cantidad_ingresada_g ?? null,
+      datos.receta?.receta_id ?? null,
+      datos.receta?.grupo ?? null,
+      datos.receta?.nombre ?? null,
+      datos.receta?.porciones ?? null,
       t,
       t,
     ],
@@ -328,4 +348,143 @@ export async function crearComidaConItems(
   });
   if (!creada) throw new Error(`No se pudo crear la comida: ${comida.id}`);
   return creada;
+}
+
+// ---------------------------------------------------------------------------
+// Repetir una comida
+// ---------------------------------------------------------------------------
+
+/**
+ * Copia una comida a `fechaHora` (ISO con offset local): mismo tipo y mismos
+ * items, con su cantidad, estado de carga y receta. La foto no se copia: es
+ * de aquella comida, no de esta.
+ *
+ * Cada grupo de receta recibe un grupo nuevo, para que la copia no quede
+ * pegada a la original, y la receta (si sigue existiendo) queda como usada
+ * ahora. Todo en una transaccion.
+ */
+export async function repetirComida(
+  comidaId: string,
+  fechaHora: string,
+  nuevaId: string = randomUUID(),
+): Promise<ComidaRow> {
+  const db = getDb();
+  const original = await obtenerComida(comidaId);
+  if (!original) throw new Error(`No existe la comida: ${comidaId}`);
+  const items = await listarItems(comidaId);
+  if (items.length === 0) throw new Error('Una comida sin items no se repite.');
+
+  const gruposNuevos = new Map<string, string>();
+  const t = ahora();
+
+  await db.withTransactionAsync(async () => {
+    await crearComida({
+      id: nuevaId,
+      usuario_id: original.usuario_id,
+      fecha_hora: fechaHora,
+      tipo: original.tipo,
+    });
+    for (const it of items) {
+      let receta: RefReceta | null = null;
+      if (it.receta_grupo !== null && it.receta_nombre !== null) {
+        let grupo = gruposNuevos.get(it.receta_grupo);
+        if (!grupo) {
+          grupo = randomUUID();
+          gruposNuevos.set(it.receta_grupo, grupo);
+        }
+        receta = {
+          receta_id: it.receta_id,
+          grupo,
+          nombre: it.receta_nombre,
+          porciones: it.receta_porciones ?? 1,
+        };
+      }
+      await agregarItem({
+        id: randomUUID(),
+        comida_id: nuevaId,
+        alimento_id: it.alimento_id,
+        cantidad_g: it.cantidad_g,
+        editado_por_usuario: it.editado_por_usuario === 1,
+        carga:
+          it.estado_carga !== null && it.cantidad_ingresada_g !== null
+            ? { estado_carga: it.estado_carga, cantidad_ingresada_g: it.cantidad_ingresada_g }
+            : null,
+        receta,
+      });
+    }
+    const recetas = [...new Set(items.map((i) => i.receta_id).filter((r): r is string => r !== null))];
+    for (const recetaId of recetas) {
+      await db.runAsync('UPDATE receta SET usada_en = ?, updated_at = ? WHERE id = ?', [t, t, recetaId]);
+    }
+  });
+
+  const creada = await obtenerComida(nuevaId);
+  if (!creada) throw new Error(`No se pudo leer la comida repetida: ${nuevaId}`);
+  return creada;
+}
+
+// ---------------------------------------------------------------------------
+// Historial por rango
+// ---------------------------------------------------------------------------
+
+/** Un dia con algo registrado y su total. */
+export interface DiaHistorial {
+  /** 'YYYY-MM-DD' local. */
+  fecha: string;
+  kcal: number;
+}
+
+/**
+ * Total de kcal por dia, solo de los dias con comidas, del mas reciente al
+ * mas viejo. Calculado en SQL: un JOIN con los items y el catalogo, sin
+ * recorrer comida por comida.
+ *
+ * Filtra por la columna generada `fecha`, que ya es el dia LOCAL: una cena a
+ * las 22:30 -03:00 (01:30 UTC del dia siguiente) cae en su dia.
+ */
+export async function totalesPorDia(
+  usuarioId: string,
+  desde: string,
+  hasta: string,
+): Promise<DiaHistorial[]> {
+  return getDb().getAllAsync<DiaHistorial>(
+    `SELECT c.fecha AS fecha,
+            COALESCE(SUM(i.cantidad_g * a.kcal_por_100g / 100.0), 0) AS kcal
+     FROM comida c
+     LEFT JOIN item_comida i ON i.comida_id = c.id
+     LEFT JOIN alimento a ON a.id = i.alimento_id
+     WHERE c.usuario_id = ? AND c.fecha BETWEEN ? AND ?
+     GROUP BY c.fecha
+     ORDER BY c.fecha DESC`,
+    [usuarioId, desde, hasta],
+  );
+}
+
+/** Una comida del historial, con su total ya sumado. */
+export interface ComidaHistorial {
+  id: string;
+  fecha: string;
+  fecha_hora: string;
+  tipo: TipoComida;
+  foto_url: string | null;
+  kcal: number;
+}
+
+/** Las comidas de un rango con su total, de la mas reciente a la mas vieja. */
+export async function comidasPorRango(
+  usuarioId: string,
+  desde: string,
+  hasta: string,
+): Promise<ComidaHistorial[]> {
+  return getDb().getAllAsync<ComidaHistorial>(
+    `SELECT c.id, c.fecha, c.fecha_hora, c.tipo, c.foto_url,
+            COALESCE(SUM(i.cantidad_g * a.kcal_por_100g / 100.0), 0) AS kcal
+     FROM comida c
+     LEFT JOIN item_comida i ON i.comida_id = c.id
+     LEFT JOIN alimento a ON a.id = i.alimento_id
+     WHERE c.usuario_id = ? AND c.fecha BETWEEN ? AND ?
+     GROUP BY c.id
+     ORDER BY c.fecha_hora DESC`,
+    [usuarioId, desde, hasta],
+  );
 }
