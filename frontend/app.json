@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "AppRendimiento",
+    "name": "Avanza",
     "slug": "apprendimiento",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -14,10 +14,9 @@
     "android": {
       "package": "com.pbdevhouse.avanza",
       "adaptiveIcon": {
-        "backgroundColor": "#FAF6EC",
+        "backgroundColor": "#243B8F",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundImage": "./assets/images/android-icon-background.png"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -43,7 +42,7 @@
         {
           "backgroundColor": "#243B8F",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 120
         }
       ],
       "expo-font",
