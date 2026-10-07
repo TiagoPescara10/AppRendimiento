@@ -4,6 +4,8 @@
 // Reemplaza a la antigua agenda en los tabs inferiores:
 // - Header con acceso al calendario histórico y botón directo "+ Rutina"
 // - Hero card "Hoy Toca" para arrancar la sesión del día en un toque
+// - "Mi semana" (los dias de gimnasio agendados) o, si no hay ninguno, la card
+//   para armarla con el asistente (app/entrenamiento/mi-semana.tsx)
 // - "Mis Rutinas" fijas organizadas por días de la semana
 // - "Sesiones recientes" (feed de entrenamientos completados con métricas)
 
@@ -44,10 +46,12 @@ import {
   type SesionReciente,
 } from '@/db/queries/sesiones';
 import { listarEventosPorFecha } from '@/db/queries/eventos';
+import { listarRutinas } from '@/db/queries/rutinas';
 import { SheetModoEntrenamiento } from '@/features/entrenamiento/components/SheetModoEntrenamiento';
 import { etiquetaTipo, ETIQUETA_INTENSIDAD, capitalizarDeporte } from '@/features/agenda/formato';
 import { aFechaLocal, diasEntre } from '@/lib/fechas';
-import type { EventoRow, TipoEvento, Intensidad } from '@/db/schema';
+import { NOMBRE_DIA_CORTO, ORDEN_SEMANA, horaCorta } from '@/features/entrenamiento/miSemana';
+import type { EventoRow, RutinaRow, TipoEvento, Intensidad } from '@/db/schema';
 
 const LETRAS_DIAS = ['D', 'L', 'M', 'Mi', 'J', 'V', 'S'];
 const ORDEN_LUNES_PRIMERO = [1, 2, 3, 4, 5, 6, 0];
@@ -104,6 +108,8 @@ export default function EntrenamientosHub() {
   const [sesionRutinaHoy, setSesionRutinaHoy] = useState<SesionReciente | null>(null);
   const [eventoHoy, setEventoHoy] = useState<EventoRow | null>(null);
   const [misRutinas, setMisRutinas] = useState<RutinaGimnasioConDetalle[]>([]);
+  // Los dias de gimnasio agendados (filas activas de `rutina`), lunes primero.
+  const [semana, setSemana] = useState<RutinaRow[]>([]);
   const [sesionesRecientes, setSesionesRecientes] = useState<SesionReciente[]>([]);
   const [filtroSesion, setFiltroSesion] = useState<FiltroSesiones>('hoy');
   const [sheetEntrenarVisible, setSheetEntrenarVisible] = useState(false);
@@ -119,11 +125,12 @@ export default function EntrenamientosHub() {
 
       const diaSemana = new Date().getDay();
 
-      const [rutinasDia, todasRutinas, eventosDelDia, recientes] = await Promise.all([
+      const [rutinasDia, todasRutinas, eventosDelDia, recientes, filasRutina] = await Promise.all([
         obtenerRutinasGimnasioDelDia(perfil.id, diaSemana),
         listarRutinasGimnasio(perfil.id, true),
         listarEventosPorFecha(perfil.id, hoyFecha),
         listarEntrenamientosCompletados(perfil.id, 50),
+        listarRutinas(perfil.id, true),
       ]);
 
       const rHoy = rutinasDia[0] ?? null;
@@ -182,6 +189,16 @@ export default function EntrenamientosHub() {
         null;
       setEventoHoy(otroEvento);
       setMisRutinas(ordenarRutinasPorSemana(todasRutinas));
+      setSemana(
+        filasRutina
+          .filter((r) => r.tipo === 'gimnasio')
+          .sort(
+            (a, b) =>
+              ORDEN_SEMANA.indexOf(a.dia_semana as (typeof ORDEN_SEMANA)[number]) -
+                ORDEN_SEMANA.indexOf(b.dia_semana as (typeof ORDEN_SEMANA)[number]) ||
+              a.hora.localeCompare(b.hora),
+          ),
+      );
       setSesionesRecientes(recientes);
     } catch (err) {
       console.error('Error al cargar pantalla de entrenamientos:', err);
@@ -232,6 +249,33 @@ export default function EntrenamientosHub() {
       : filtroSesion === 'semana'
       ? 'Todavía no registraste entrenamientos completados esta semana.'
       : 'Todavía no registraste entrenamientos completados este mes.';
+
+  // Sin dias de gimnasio agendados, el camino es armar la semana. Si hoy no hay
+  // nada, la card ocupa el lugar del hero vacio; si hay un partido o un
+  // entrenamiento de deporte, el hero queda y la card va debajo.
+  const sinSemana = semana.length === 0;
+  const heroVacio = !rutinaHoy && !(eventoHoy && eventoHoy.completado === 0);
+  const nombreRutina = (id: string | null) =>
+    (id && misRutinas.find((r) => r.id === id)?.nombre) || 'Gimnasio libre';
+
+  const cardArmarSemana = (
+    <View style={estilos.heroCard}>
+      <View style={estilos.heroTopFila}>
+        <Text style={estilos.heroTitulo}>Armá tu semana de gimnasio</Text>
+        <Ionicons name="calendar" size={sizes.icon} color={colors.accentSoft} />
+      </View>
+      <Text style={estilos.heroSubtitulo}>
+        Elegí los días, qué hacés cada uno y a qué hora. Te lleva 1 minuto.
+      </Text>
+      <Pressable
+        style={({ pressed }) => [estilos.heroBoton, pressed && estilos.heroBotonPresionado]}
+        onPress={() => router.push('/entrenamiento/mi-semana')}
+        accessibilityRole="button"
+      >
+        <Text style={estilos.heroBotonTexto}>Empezar</Text>
+      </Pressable>
+    </View>
+  );
 
   return (
     <Pantalla>
@@ -450,6 +494,8 @@ export default function EntrenamientosHub() {
             </Pressable>
           );
         })()
+      ) : sinSemana ? (
+        cardArmarSemana
       ) : (
         <View style={estilos.heroVacioCard}>
           <View style={estilos.heroVacioInfo}>
@@ -466,6 +512,33 @@ export default function EntrenamientosHub() {
             <Text style={estilos.heroVacioBotonTexto}>Entrenar</Text>
           </Pressable>
         </View>
+      )}
+
+      {sinSemana && !heroVacio && cardArmarSemana}
+
+      {/* Sección: Mi semana */}
+      {!sinSemana && (
+        <>
+          <View style={estilos.seccionFila}>
+            <Text style={estilos.seccionTitulo}>Mi semana</Text>
+          </View>
+          <View style={estilos.semanaCard}>
+            {semana.map((r) => (
+              <Text key={r.id} style={estilos.semanaFila}>
+                {NOMBRE_DIA_CORTO[r.dia_semana]} · {nombreRutina(r.rutina_gimnasio_id)} ·{' '}
+                {horaCorta(r.hora)}
+              </Text>
+            ))}
+            <Pressable
+              style={({ pressed }) => [estilos.semanaBoton, pressed && estilos.cardPresionada]}
+              onPress={() => router.push('/entrenamiento/mi-semana')}
+              accessibilityRole="button"
+            >
+              <Ionicons name="create-outline" size={16} color={colors.action} />
+              <Text style={estilos.seccionAccionTexto}>Editar mi semana</Text>
+            </Pressable>
+          </View>
+        </>
       )}
 
       {/* Sección: Mis Rutinas */}
@@ -488,6 +561,9 @@ export default function EntrenamientosHub() {
       </View>
 
       {misRutinas.length === 0 ? (
+        // Con la card de armar la semana a la vista, una segunda invitacion
+        // a crear rutinas compite con ella: el asistente ya ofrece crearlas.
+        sinSemana ? null : (
         <View style={estilos.cardVacia}>
           <Ionicons name="barbell-outline" size={28} color={colors.textMuted} />
           <Text style={estilos.cardVaciaTexto}>No tenés rutinas definidas todavía.</Text>
@@ -505,6 +581,7 @@ export default function EntrenamientosHub() {
             <Text style={estilos.seccionAccionTexto}>Ver rutinas predefinidas</Text>
           </Pressable>
         </View>
+        )
       ) : (
         <ScrollView
           horizontal
@@ -983,6 +1060,27 @@ const estilos = StyleSheet.create({
     fontSize: fontSize.caption,
     fontWeight: fontWeight.bold,
     color: colors.action,
+  },
+
+  semanaCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    gap: spacing.xs,
+    ...shadow.card,
+  },
+  semanaFila: {
+    fontSize: fontSize.small,
+    lineHeight: lineHeight.small,
+    color: colors.textPrimary,
+  },
+  semanaBoton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.xs,
+    marginTop: spacing.xs,
   },
 
   cardVacia: {
