@@ -17,6 +17,7 @@ import { RecetasGuardadas } from '@/features/comidas/components/RecetasGuardadas
 import { SheetGuardarReceta } from '@/features/comidas/components/SheetGuardarReceta';
 import { guardarComidaComoReceta } from '@/db/queries/recetas';
 import type { ComidaHistorial } from '@/db/queries/comidas';
+import { BotonGuia } from '@/features/guias/components/BotonGuia';
 
 type Pestana = 'historial' | 'guardadas';
 const PESTANAS: { valor: Pestana; label: string }[] = [
@@ -72,6 +73,7 @@ export default function MisComidas() {
             <Text style={estilos.flechaVolver}>‹</Text>
           </Pressable>
           <Text style={estilos.tituloPantalla}>Mis comidas</Text>
+          <BotonGuia id="mis-comidas" />
         </View>
 
         <View style={estilos.pestanas}>

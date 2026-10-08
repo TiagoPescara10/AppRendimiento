@@ -46,6 +46,7 @@ import type { RutinaRow } from '@/db/schema';
 import { guardarMiSemana } from '@/features/agenda/materializar';
 import { pedirPermisoAvisosSiCorresponde } from '@/features/avisos/permiso';
 import { SheetElegirRutina } from '@/features/entrenamiento/components/SheetElegirRutina';
+import { BotonGuia } from '@/features/guias/components/BotonGuia';
 import {
   DURACIONES_SEMANA,
   LETRA_DIA,
@@ -64,9 +65,6 @@ import {
   type EstadoAsistente,
   type RefRutina,
 } from '@/features/entrenamiento/miSemana';
-
-// TODO(guias): el "?" del header tiene que abrir la guia con este id.
-const GUIA_ID = 'mi-semana';
 
 const TITULOS = [
   '¿Qué días vas al gimnasio?',
@@ -305,18 +303,7 @@ export default function MiSemana() {
             <Text style={estilos.etiquetaPaso}>
               {paso < TOTAL_PASOS - 1 ? `PASO ${paso + 1} DE ${TOTAL_PASOS - 1}` : 'RESUMEN'}
             </Text>
-            <Pressable
-              style={({ pressed }) => [estilos.botonAyuda, pressed && estilos.presionado]}
-              onPress={() => {
-                // TODO(guias): abrir la guia GUIA_ID cuando exista la pantalla de guias.
-                void GUIA_ID;
-              }}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel="Ver guía"
-            >
-              <Ionicons name="help-circle-outline" size={sizes.icon} color={colors.textSecondary} />
-            </Pressable>
+            <BotonGuia id="mi-semana" style={estilos.botonAyuda} />
           </View>
           <Progreso actual={paso + 1} total={TOTAL_PASOS} />
         </View>
@@ -564,11 +551,6 @@ const estilos = StyleSheet.create({
   botonAyuda: {
     position: 'absolute',
     right: 0,
-    width: sizes.controlSmall,
-    height: sizes.controlSmall,
-    borderRadius: radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   presionado: { backgroundColor: colors.surfaceAlt },
   titulo: {

@@ -44,6 +44,7 @@ import {
   crearEjercicio,
 } from '@/db/queries/ejercicios';
 import { randomUUID } from '@/db/sync/uuid';
+import { BotonGuia } from '@/features/guias/components/BotonGuia';
 import {
   aDatos,
   aplanar,
@@ -410,6 +411,7 @@ export default function NuevaRutinaGimnasio() {
           <Text style={estilos.flecha}>‹</Text>
         </Pressable>
         <Text style={estilos.titulo}>{esEdicion ? 'Editar rutina' : 'Nueva rutina'}</Text>
+        <BotonGuia id="crear-rutina" />
       </View>
 
       {/* Atajo a la biblioteca: solo al crear, editar una rutina no la reemplaza */}

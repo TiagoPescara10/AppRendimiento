@@ -48,6 +48,7 @@ import {
   type RutinaGimnasioAgrupada,
 } from '@/features/agenda/rutinas';
 import { etiquetaTipo, capitalizarDeporte } from '@/features/agenda/formato';
+import { BotonGuia } from '@/features/guias/components/BotonGuia';
 
 export default function MisRutinas() {
   const router = useRouter();
@@ -204,6 +205,7 @@ export default function MisRutinas() {
           <Text style={estilos.flechaVolver}>‹</Text>
         </Pressable>
         <Text style={estilos.tituloPantalla}>Mis rutinas</Text>
+        <BotonGuia id="mi-semana" />
       </View>
 
       {sinRutinas ? (

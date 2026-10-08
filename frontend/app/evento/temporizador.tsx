@@ -40,6 +40,7 @@ import { FilaNumero } from '@/features/entrenamiento/components/FilaNumero';
 import { Anillo } from '@/features/entrenamiento/components/Anillo';
 import { VistaPrevia } from '@/features/entrenamiento/components/VistaPrevia';
 import { VistaCronometroLibre } from '@/features/entrenamiento/components/VistaCronometroLibre';
+import { BotonGuia } from '@/features/guias/components/BotonGuia';
 import { cargarNivel } from '@/features/nivel/api';
 import type { DatosNivel } from '@/features/nivel/api';
 import { GananciaXP } from '@/features/nivel/components/GananciaXP';
@@ -619,6 +620,7 @@ export default function Temporizador() {
           <Text style={estilos.flecha}>‹</Text>
         </Pressable>
         <Text style={estilos.titulo}>Temporizador</Text>
+        {cronometro && <BotonGuia id="cronometro" />}
       </View>
 
       {/* Los presets primero: casi siempre uno de estos es lo que se busca, y

@@ -19,6 +19,7 @@ import { BuscadorAlimentos } from '@/features/comidas/components/BuscadorAliment
 import { TarjetaTotales } from '@/features/comidas/components/TarjetaTotales';
 import { TIPOS_COMIDA, tipoPorHora } from '@/features/comidas/tipos';
 import { SheetAgregarReceta } from '@/features/comidas/components/SheetAgregarReceta';
+import { BotonGuia } from '@/features/guias/components/BotonGuia';
 import { buscarRecetas, itemsDeReceta, marcarUsada, obtenerReceta } from '@/db/queries/recetas';
 import type { RecetaCompleta, RecetaConResumen } from '@/db/queries/recetas';
 import { porPorcion, textoPorciones } from '@/lib/recetas';
@@ -298,6 +299,7 @@ export default function NuevaComida() {
           <Text style={estilos.selectorTexto}>{capitalizar(tipo)}</Text>
           <Text style={estilos.selectorFlecha}>▾</Text>
         </Pressable>
+        <BotonGuia id="registrar-comida" />
       </View>
 
       {/* Buscador + los dos accesos alternativos: foto y codigo de barras. */}
