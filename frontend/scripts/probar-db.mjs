@@ -3726,6 +3726,68 @@ await prueba('guardarMiSemana() es todo o nada: si algo falla no queda ninguna c
   await schema.cerrarDb();
 });
 
+// El caso que reporto el usuario: miercoles de gimnasio libre a las 19:00,
+// editado el mismo miercoles a la noche. El de hoy ya empezo, asi que no es
+// "futuro", pero si no lo contesto se corrige; si lo contesto, no se toca.
+
+async function semanaLibreDelMiercoles(archivo) {
+  await baseSemana(archivo);
+  await qRutinas.crearRutina({
+    id: 'ru-mie-libre', usuario_id: 'u-s', dia_semana: 3, hora: '19:00', tipo: 'gimnasio',
+    duracion_estimada_min: 60, intensidad: 'media', rutina_gimnasio_id: null,
+  });
+  await agenda.materializarRutinas('u-s', 8, new Date(2026, 8, 23, 10, 0));
+}
+
+/** Miercoles 7/10/2026 a las 21:15: el gimnasio de las 19:00 ya paso. */
+const MIE_NOCHE = new Date(2026, 9, 7, 21, 15);
+
+async function cambiarMiercolesA(predefinidaId, extra = {}) {
+  const { filas, ctx } = await contextoSemana();
+  const e = { ...miSemana.estadoDesdeRutinas(filas), ...extra };
+  e.rutinaPorDia[3] = { origen: 'predefinida', id: predefinidaId };
+  await agenda.guardarMiSemana('u-s', miSemana.planDesdeAsistente(e, filas, ctx), MIE_NOCHE);
+}
+
+const eventosMiercoles = () =>
+  schema.getDb().getAllAsync(
+    "SELECT fecha, substr(fecha_hora_inicio, 12, 5) AS h, rutina_gimnasio_id AS rg FROM evento WHERE rutina_id = 'ru-mie-libre' ORDER BY fecha_hora_inicio",
+  );
+
+await prueba('guardarMiSemana() el mismo dia: la ocurrencia de hoy sin contestar toma la rutina nueva', async () => {
+  await semanaLibreDelMiercoles('mi-semana-hoy.db');
+  await cambiarMiercolesA('predef-pecho-triceps');
+  const copia = (await qRutinasGimnasio.listarRutinasGimnasio('u-s', true))[0].id;
+  const ev = await eventosMiercoles();
+  igual(ev.find((x) => x.fecha === '2026-10-07').rg, copia, 'hoy pasa a Pecho y triceps');
+  igual(ev.filter((x) => x.fecha === '2026-10-07').length, 1, 'una sola ocurrencia hoy');
+  igual(ev.find((x) => x.fecha === '2026-09-30').rg, null, 'la semana pasada no se toca');
+  igual(ev.find((x) => x.fecha === '2026-10-14').rg, copia, 'la proxima ya tiene la rutina');
+  await schema.cerrarDb();
+});
+
+await prueba('guardarMiSemana() el mismo dia: si ya contesto la de hoy, queda como estaba', async () => {
+  await semanaLibreDelMiercoles('mi-semana-hoy-respondido.db');
+  const hoy = (await eventosMiercoles()).find((x) => x.fecha === '2026-10-07');
+  await schema.getDb().runAsync(
+    "UPDATE evento SET respondido = 1, completado = 1 WHERE rutina_id = 'ru-mie-libre' AND fecha = '2026-10-07'",
+  );
+  await cambiarMiercolesA('predef-pecho-triceps');
+  const ev = (await eventosMiercoles()).find((x) => x.fecha === '2026-10-07');
+  igual(ev.rg, null, 'sigue como gimnasio libre');
+  igual(ev.h, hoy.h, 'misma hora');
+  await schema.cerrarDb();
+});
+
+await prueba('guardarMiSemana() el mismo dia con una hora que todavia no llego: hoy pasa a esa hora, sin duplicar', async () => {
+  await semanaLibreDelMiercoles('mi-semana-hoy-hora.db');
+  await cambiarMiercolesA('predef-pecho-triceps', { horaUnica: '22:00' });
+  const deHoy = (await eventosMiercoles()).filter((x) => x.fecha === '2026-10-07');
+  igual(deHoy.length, 1, 'una sola ocurrencia hoy');
+  igual(deHoy[0].h, '22:00', 'a la hora nueva');
+  await schema.cerrarDb();
+});
+
 // --- salida ----------------------------------------------------------------
 
 rmSync(tmp, { recursive: true, force: true });

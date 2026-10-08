@@ -344,6 +344,26 @@ export async function eliminarEventosFuturosDeRutina(
   return r.changes;
 }
 
+/**
+ * La ocurrencia de hoy de una rutina que ya empezo y que el usuario todavia
+ * no contesto, o null. Sin completar, sin responder y sin sesion registrada:
+ * es la unica pasada que todavia se puede corregir sin tocar el historial.
+ * `fecha` es "YYYY-MM-DD" local; `antesDe` es ISO con offset local.
+ */
+export async function eventoDeHoySinResponder(
+  rutinaId: string,
+  fecha: string,
+  antesDe: string,
+): Promise<EventoRow | null> {
+  return getDb().getFirstAsync<EventoRow>(
+    `SELECT * FROM evento
+     WHERE rutina_id = ? AND fecha = ? AND fecha_hora_inicio < ?
+       AND completado = 0 AND respondido = 0
+       AND id NOT IN (SELECT evento_id FROM sesion_entrenamiento)`,
+    [rutinaId, fecha, antesDe],
+  );
+}
+
 export async function fechasMaterializadasDeRutinaGimnasio(
   rutinaGimnasioIds: string[],
   desde: string,

@@ -13,7 +13,9 @@
 // por que no se pasa por toISOString().
 
 import {
+  actualizarEvento,
   eliminarEventosFuturosDeRutina,
+  eventoDeHoySinResponder,
   fechasMaterializadas,
   eliminarEventosFuturosDeRutinaGimnasio,
   crearEvento,
@@ -269,7 +271,11 @@ export async function desactivarRutina(
  *      altas: asi un dia nunca tiene dos filas activas con la misma rutina,
  *      que el indice unico de la migracion 015 rechazaria;
  *   3. actualiza las filas que cambiaron y borra sus ocurrencias futuras,
- *      que materializarRutinas vuelve a crear con la hora y la rutina nuevas;
+ *      que materializarRutinas vuelve a crear con la hora y la rutina nuevas.
+ *      La de hoy que ya empezo no es futura, pero si el usuario todavia no
+ *      contesto si fue, se corrige en el lugar: si no, editar un miercoles a
+ *      la noche dejaba el miercoles de hoy con la rutina vieja en la agenda.
+ *      Si ya contesto, o hay una sesion, queda como estaba;
  *   4. crea las filas nuevas.
  *
  * Con un plan sin cambios no escribe nada. Devuelve cuantas rutinas copio.
@@ -305,6 +311,15 @@ export async function guardarMiSemana(
         rutina_gimnasio_id: resolver(a.rutina),
       });
       await eliminarEventosFuturosDeRutina(a.id, corte);
+
+      const deHoy = await eventoDeHoySinResponder(a.id, aFechaLocal(hoy), corte);
+      if (deHoy) {
+        await actualizarEvento(deHoy.id, {
+          fecha_hora_inicio: inicioLocalISO(hoy, a.hora),
+          duracion_estimada_min: a.duracion_estimada_min,
+          rutina_gimnasio_id: resolver(a.rutina),
+        });
+      }
     }
 
     for (const c of plan.crear) {
