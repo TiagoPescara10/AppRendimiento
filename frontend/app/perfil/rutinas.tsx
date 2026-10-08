@@ -156,22 +156,12 @@ export default function MisRutinas() {
     });
   };
 
-  // Dias y hora de una rutina de gimnasio ya asignada. El lapiz edita el
-  // catalogo (nombre y ejercicios); la programacion se edita en Nuevo evento.
-  const editarDiasGimnasio = (rutina: RutinaGimnasioAgrupada) => {
-    router.push({
-      pathname: '/evento/nuevo',
-      params: {
-        rutinaIds: rutina.ids.join(','),
-        tipo: 'gimnasio',
-        dias: rutina.dias.join(','),
-        hora: rutina.hora,
-        duracion: String(rutina.duracion_estimada_min ?? 60),
-        intensidad: rutina.intensidad,
-      },
-    });
-  };
+  // Los dias y la hora del gimnasio se editan en el asistente Mi semana, que
+  // ve la semana entera. Nuevo evento queda para el deporte y los partidos.
+  const abrirMiSemana = () => router.push('/entrenamiento/mi-semana');
 
+  // El lapiz edita el catalogo (nombre y ejercicios). El gimnasio libre no
+  // tiene catalogo: lo que hay para editar son sus dias, en Mi semana.
   const editarGimnasio = (rutina: RutinaGimnasioAgrupada) => {
     if (rutina.rutinaGimnasioId) {
       router.push({
@@ -181,17 +171,7 @@ export default function MisRutinas() {
         },
       });
     } else {
-      router.push({
-        pathname: '/evento/nuevo',
-        params: {
-          rutinaIds: rutina.ids.join(','),
-          tipo: 'gimnasio',
-          dias: rutina.dias.join(','),
-          hora: rutina.hora,
-          duracion: String(rutina.duracion_estimada_min ?? 60),
-          intensidad: rutina.intensidad,
-        },
-      });
+      abrirMiSemana();
     }
   };
 
@@ -206,6 +186,9 @@ export default function MisRutinas() {
   }
 
   const sinRutinas = entrenamientos.length === 0 && gimnasios.length === 0;
+  // Hay semana de gimnasio si alguna rutina tiene dias asignados: las del
+  // catalogo sin dias tambien vienen en `gimnasios`, con ids vacio.
+  const hayDiasGimnasio = gimnasios.some((g) => g.ids.length > 0);
 
   return (
     <Pantalla>
@@ -231,11 +214,13 @@ export default function MisRutinas() {
           </View>
           <Text style={estilos.vacioTitulo}>No tenes rutinas activas</Text>
           <Text style={estilos.vacioTexto}>
-            Crea una rutina semanal para agendar tus entrenamientos o planificar tus sesiones de gimnasio.
+            Elegí qué días vas al gimnasio, qué hacés cada uno y a qué hora.
           </Text>
           <View style={estilos.vacioAcciones}>
+            <Boton titulo="Armá tu semana de gimnasio" onPress={abrirMiSemana} />
             <Boton
-              titulo="Crear entrenamiento semanal"
+              titulo="Agendar deporte o partido"
+              variante="secundario"
               onPress={() => router.push('/evento/nuevo')}
             />
             <Boton
@@ -324,6 +309,12 @@ export default function MisRutinas() {
           {/* Seccion 2: Rutinas de gimnasio */}
           <View style={estilos.seccionBloque}>
             <Text style={estilos.seccionTitulo}>Rutinas de gimnasio</Text>
+            <Boton
+              titulo={hayDiasGimnasio ? 'Editar mi semana' : 'Armá tu semana de gimnasio'}
+              variante={hayDiasGimnasio ? 'secundario' : 'primario'}
+              icono="calendar-outline"
+              onPress={abrirMiSemana}
+            />
             {gimnasios.length === 0 ? (
               <View style={estilos.cardVacia}>
                 <Text style={estilos.textoVacio}>No tenes rutinas de gimnasio activas.</Text>
@@ -364,7 +355,7 @@ export default function MisRutinas() {
                       <View style={estilos.accionesFila}>
                         {item.rutinaGimnasioId && item.ids.length > 0 && (
                           <Pressable
-                            onPress={() => editarDiasGimnasio(item)}
+                            onPress={abrirMiSemana}
                             hitSlop={10}
                             style={estilos.botonAccion}
                             accessibilityRole="button"
