@@ -404,7 +404,7 @@ export default function EntrenamientosHub() {
             }
           >
             <Ionicons name="play" size={16} color={colors.textOnAction} />
-            <Text style={estilos.heroBotonTexto}>Iniciar sesión</Text>
+            <Text style={estilos.heroBotonTexto}>Empezar entrenamiento</Text>
           </Pressable>
         </View>
       ) : eventoHoy && eventoHoy.completado === 0 ? (
@@ -628,7 +628,7 @@ export default function EntrenamientosHub() {
                 </Text>
 
                 <View style={estilos.rutinaCardFooter}>
-                  <Text style={estilos.rutinaCardIniciar}>Iniciar ›</Text>
+                  <Text style={estilos.rutinaCardIniciar}>Empezar ›</Text>
                 </View>
               </Pressable>
             );
