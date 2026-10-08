@@ -303,6 +303,15 @@ export default function EntrenamientosHub() {
           </Pressable>
 
           <Pressable
+            style={estilos.botonAccionHeader}
+            onPress={() => router.push('/perfil/guias')}
+            hitSlop={8}
+            accessibilityLabel="Ver guías"
+          >
+            <Ionicons name="help-circle-outline" size={sizes.icon} color={colors.action} />
+          </Pressable>
+
+          <Pressable
             style={estilos.botonNuevaRutina}
             onPress={() => router.push('/rutina-gimnasio/nueva')}
             hitSlop={8}

@@ -29,6 +29,8 @@ import { CardHidratacion } from '@/features/nutricion/components/CardHidratacion
 import { MascotaLeon } from '@/features/mascota/MascotaLeon';
 import { bonoMensualPendiente } from '@/features/nivel/api';
 import { CardBonoMensual } from '@/features/nivel/components/CardBonoMensual';
+import { CardGuias } from '@/features/guias/components/CardGuias';
+import { cerrarCardGuias, mostrarCardGuias } from '@/features/guias/cardInicio';
 import {
   obtenerConsejoLeon,
   type ConsejoLeon,
@@ -91,6 +93,7 @@ export default function Dashboard() {
   // foco: la marca en meta ya quedo escrita, asi que el siguiente foco
   // devuelve null y no tiene que hacer desaparecer lo que se esta leyendo.
   const [bonoMensual, setBonoMensual] = useState<string | null>(null);
+  const [cardGuias, setCardGuias] = useState(false);
 
   // useFocusEffect y no useEffect: al volver de registrar una comida o agua, el
   // dashboard tiene que reflejarla.
@@ -103,6 +106,11 @@ export default function Dashboard() {
         if (!perfil) return;
 
         // Aparte y sin esperar: no frena el resto del dashboard.
+        mostrarCardGuias()
+          .then((mostrar) => {
+            if (vivo) setCardGuias(mostrar);
+          })
+          .catch((e) => console.error('Error al leer la card de guias:', e));
         bonoMensualPendiente(perfil.id)
           .then((texto) => {
             if (vivo && texto) setBonoMensual(texto);
@@ -406,6 +414,21 @@ export default function Dashboard() {
           onPress={() => setSheetEntrenarVisible(true)}
         />
       </View>
+
+      {/* Para el que recien empieza. Tocarla o cerrarla la oculta para siempre. */}
+      {cardGuias && (
+        <CardGuias
+          onAbrir={() => {
+            setCardGuias(false);
+            void cerrarCardGuias();
+            router.push('/perfil/guias');
+          }}
+          onCerrar={() => {
+            setCardGuias(false);
+            void cerrarCardGuias();
+          }}
+        />
+      )}
 
       {/* Va aca y no en el layout raiz: asi nunca aparece sobre el onboarding
           ni sobre el registro. Se muestra una sola vez por sesion de app. */}
