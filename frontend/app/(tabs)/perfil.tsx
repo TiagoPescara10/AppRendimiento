@@ -1,5 +1,5 @@
 // Pantalla de Perfil de usuario
-// Cuatro bloques: Identidad, Objetivo, Ajustes, Ayuda y cerrar sesión.
+// Cuatro bloques: Identidad, Objetivo, Ajustes, Guías, Ayuda y cerrar sesión.
 
 import { useState, useCallback } from 'react';
 import {
@@ -496,6 +496,16 @@ export default function Perfil() {
           <View style={estilos.opcionIzquierda}>
             <Ionicons name="lock-closed-outline" size={sizes.iconSmall} color={colors.textSecondary} />
             <Text style={estilos.opcionTexto}>Privacidad</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+        </Pressable>
+
+        {/* Guias paso a paso. Visible tambien en la beta: va donde ira Ayuda y soporte. */}
+        <View style={estilos.separador} />
+        <Pressable style={estilos.opcionFila} onPress={() => router.push('/perfil/guias')}>
+          <View style={estilos.opcionIzquierda}>
+            <Ionicons name="help-circle-outline" size={sizes.iconSmall} color={colors.textSecondary} />
+            <Text style={estilos.opcionTexto}>Guías</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </Pressable>
