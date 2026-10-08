@@ -332,6 +332,7 @@ export default function NuevaComida() {
               accessibilityLabel="Registrar con foto"
             >
               <Text style={estilos.accionIcono}>📷</Text>
+              <Text style={estilos.accionTexto}>Foto</Text>
             </Pressable>
             <Pressable
               style={estilos.accionChica}
@@ -339,6 +340,7 @@ export default function NuevaComida() {
               accessibilityLabel="Escanear código de barras"
             >
               <Text style={estilos.accionIcono}>▥</Text>
+              <Text style={estilos.accionTexto}>Código</Text>
             </Pressable>
           </>
         }
@@ -476,15 +478,23 @@ const estilos = StyleSheet.create({
   },
   selectorFlecha: { fontSize: fontSize.small, color: colors.textSecondary },
 
+  // Icono con su nombre abajo: solo el icono no decia que hacia cada boton.
   accionChica: {
-    width: 44,
-    height: 44,
+    minWidth: 52,
+    height: sizes.control,
+    paddingHorizontal: spacing.xs,
     borderRadius: radius.md,
     backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  accionIcono: { fontSize: 20 },
+  accionIcono: { fontSize: fontSize.body, lineHeight: lineHeight.body },
+  accionTexto: {
+    fontSize: fontSize.caption,
+    lineHeight: lineHeight.caption,
+    fontWeight: fontWeight.medium,
+    color: colors.textSecondary,
+  },
 
   vacio: { paddingVertical: spacing.xl, alignItems: 'center', gap: spacing.xs },
 
