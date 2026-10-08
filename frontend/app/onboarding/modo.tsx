@@ -5,10 +5,9 @@
 // original de las cards y con respiro inferior adecuado sobre el safe area.
 
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { sembrarDatosDesarrollo } from '@/db/seeds/devSeed';
 
 import { Pantalla } from '@/ui/Pantalla';
 import { Progreso } from '@/ui/Progreso';
@@ -76,20 +75,6 @@ export default function ModoOnboarding() {
   const continuar = () => {
     if (!modo) return;
     router.push('/onboarding/datos');
-  };
-
-  const cargarSeedDev = async () => {
-    if (guardando) return;
-    setGuardando(true);
-    try {
-      await sembrarDatosDesarrollo();
-      router.replace('/(tabs)');
-    } catch (e: any) {
-      console.error('Error al sembrar seed:', e);
-      Alert.alert('Error', e?.message ?? 'No se pudo cargar el seed.');
-    } finally {
-      setGuardando(false);
-    }
   };
 
   const totalPasos = modo === 'recuento' ? 4 : 6;
@@ -282,22 +267,6 @@ export default function ModoOnboarding() {
           <Ionicons name="arrow-forward" size={18} color={colors.textOnAction} />
         </Pressable>
 
-        {__DEV__ && (
-          <Pressable
-            accessibilityRole="button"
-            disabled={guardando}
-            onPress={cargarSeedDev}
-            style={({ pressed }) => [
-              estilos.botonDev,
-              pressed && { opacity: 0.6 },
-            ]}
-          >
-            <Ionicons name="flash-outline" size={15} color={colors.textSecondary} />
-            <Text style={estilos.textoBotonDev}>
-              {guardando ? 'Cargando datos de prueba…' : '⚡ Cargar datos de prueba (Seed Dev)'}
-            </Text>
-          </Pressable>
-        )}
       </View>
     </Pantalla>
   );
@@ -493,18 +462,5 @@ const estilos = StyleSheet.create({
     fontSize: fontSize.body,
     fontWeight: fontWeight.bold,
     color: colors.textOnAction,
-  },
-  botonDev: {
-    marginTop: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.sm,
-  },
-  textoBotonDev: {
-    fontSize: fontSize.caption,
-    color: colors.textSecondary,
-    fontWeight: fontWeight.medium,
   },
 });

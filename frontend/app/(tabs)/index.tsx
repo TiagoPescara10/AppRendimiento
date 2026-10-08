@@ -12,7 +12,6 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Pantalla } from '@/ui/Pantalla';
-import { Boton } from '@/ui/Boton';
 import { colors, spacing, radius, fontSize, fontWeight, lineHeight, shadow, sizes } from '@/ui/theme';
 
 import { calcularTodo, calcularMetaAgua } from '@/lib/nutricion';
@@ -407,13 +406,6 @@ export default function Dashboard() {
           onPress={() => setSheetEntrenarVisible(true)}
         />
       </View>
-
-      {/* --- SOLO DESARROLLO: sacar antes de publicar --- */}
-      <Boton
-        titulo="Playground"
-        variante="secundario"
-        onPress={() => router.push('/playground')}
-      />
 
       {/* Va aca y no en el layout raiz: asi nunca aparece sobre el onboarding
           ni sobre el registro. Se muestra una sola vez por sesion de app. */}

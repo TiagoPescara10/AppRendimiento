@@ -25,7 +25,6 @@ import { MODO_BETA } from '@/config/beta';
 import Constants from 'expo-constants';
 import { SheetRegistroPeso } from '@/features/perfil/components/SheetRegistroPeso';
 import { SheetMetaAgua } from '@/features/perfil/components/SheetMetaAgua';
-import { sembrarDatosDesarrollo } from '@/db/seeds/devSeed';
 import { cargarNivel } from '@/features/nivel/api';
 import type { DatosNivel } from '@/features/nivel/api';
 import { BarraNivel } from '@/features/nivel/components/BarraNivel';
@@ -167,23 +166,6 @@ export default function Perfil() {
         },
       ]
     );
-  };
-
-  const [sembrando, setSembrando] = useState(false);
-
-  const ejecutarSeed = async () => {
-    if (sembrando || !perfil) return;
-    setSembrando(true);
-    try {
-      await sembrarDatosDesarrollo(perfil.id);
-      await cargarDatos();
-      Alert.alert('Seed completado', 'Se cargaron los datos de prueba en tu perfil.');
-    } catch (e: any) {
-      console.error('Error al cargar seed:', e);
-      Alert.alert('Error', e?.message ?? 'No se pudo cargar el seed.');
-    } finally {
-      setSembrando(false);
-    }
   };
 
   if (cargando) {
@@ -526,24 +508,6 @@ export default function Perfil() {
 
         {/* Cada fila opcional trae su separador ARRIBA: asi, si se oculta, no
             queda una linea suelta al pie de la card. */}
-        {__DEV__ && (
-          <>
-            <View style={estilos.separador} />
-            <Pressable
-              style={estilos.opcionFila}
-              onPress={ejecutarSeed}
-              disabled={sembrando}
-            >
-              <View style={estilos.opcionIzquierda}>
-                <Ionicons name="flash-outline" size={sizes.iconSmall} color={colors.action} />
-                <Text style={[estilos.opcionTexto, { color: colors.action, fontWeight: fontWeight.medium }]}>
-                  {sembrando ? 'Cargando datos de prueba…' : 'Cargar datos de prueba (Seed)'}
-                </Text>
-              </View>
-            </Pressable>
-          </>
-        )}
-
         {/* Oculto en beta: lleva a un login de mentira que acepta cualquier
             cosa (src/config/beta.ts). */}
         {!MODO_BETA && (
